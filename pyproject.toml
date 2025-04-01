@@ -1,6 +1,6 @@
 [project]
 name = "pxm-tools"
-version = "0.1.0"
+version = "0.1.1"
 description = "A collection of tools to interact with Proxmox API."
 readme = "README.md"
 authors = [
@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 pxm-create = "pxm_tools.cli.create:main"
+pxm-edit = "pxm_tools.cli.edit:main"
 pxm-rm = "pxm_tools.cli.remove:main"
 pxm-start = "pxm_tools.cli.start:main"
 pxm-stop = "pxm_tools.cli.stop:main"

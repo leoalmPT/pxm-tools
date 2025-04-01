@@ -1,4 +1,9 @@
 
+from pxm_tools.Proxmox import Proxmox
+
 
 def main():
-    print("Stop")
+    parser = Proxmox.default_parser()
+    args = Proxmox.parse_args(parser)
+    p = Proxmox(args)
+    p.stop_all_vms()

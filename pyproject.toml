@@ -1,6 +1,6 @@
 [project]
 name = "pxm-tools"
-version = "0.1.4"
+version = "0.1.5"
 description = "A collection of tools to interact with Proxmox API."
 readme = "README.md"
 authors = [

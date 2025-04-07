@@ -21,7 +21,7 @@ class Proxmox:
     @staticmethod
     def default_parser() -> argparse.ArgumentParser:
         parser = argparse.ArgumentParser(description="Proxmox API Wrapper")
-        parser.add_argument("--config", type=str, help="Path to the config file", default="config.json")
+        parser.add_argument("--config", type=str, help="Path to the config file", default=None)
         parser.add_argument("--api", type=str, default=os.getenv("PM_API_URL"), help="Proxmox API URL")
         parser.add_argument("--user", type=str, default=os.getenv("PM_USER"), help="Proxmox user")
         parser.add_argument("--pass", type=str, default=os.getenv("PM_PASS"), help="Proxmox password")

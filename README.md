@@ -28,7 +28,7 @@ Some arguments can be used from environment variables or .env file.
 --pass  # PM_PASS
 ```
 
-Options can be passed as a JSON file such as `--config my_config.json` (`config.json` by default)
+Options can be passed as a JSON file such as `--config config.json`
 
 ```json
 {
@@ -39,7 +39,8 @@ Options can be passed as a JSON file such as `--config my_config.json` (`config.
     
     "vm-cipassword": "flexfl",
     "vm-net0/rate": 50,
-    "vm-net0/bridge": "vmbr1"
+    "vm-net0/bridge": "vmbr1",
+    "vm-localtime": 1
 }
 ```
 

@@ -35,11 +35,12 @@ class Proxmox:
     def parse_args(parser: argparse.ArgumentParser) -> dict:
         args, unknown = parser.parse_known_args()
         config = {}
-        if not Path(args.config).exists() and args.config != "config.json":
-            raise Exception(f"Config file {args.config} does not exist.")
-        with open(args.config, "r") as f:
-            config = json.load(f)
-        parser.set_defaults(**config)
+        if args.config is not None:
+            if not Path(args.config).exists():
+                raise Exception(f"Config file {args.config} does not exist.")
+            with open(args.config, "r") as f:
+                config = json.load(f)
+            parser.set_defaults(**config)
         args, unknown = parser.parse_known_args()
         args = vars(args)
         for k, v in args.items():
@@ -123,11 +124,11 @@ class Proxmox:
     def setup_vm(self, name) -> int:
         vm_id = self.next_id()
         self.clone_vm(vm_id, name)
-        self.console.log(f"VM: [bold cyan]{name}[/bold cyan] created with ID: {vm_id}.")
+        self.console.log(f"VM [bold cyan]{name}[/bold cyan] created with ID {vm_id}.")
         with self.console.status(f"Cloning VM {vm_id}..."):
             endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
             self.wait_for(endpoint, lambda r: r.status_code != 403)
-        self.console.log(f"VM [bold cyan]{vm_id}:{name}[/bold cyan] cloning completed.")
+        self.console.log(f"VM [bold cyan]{vm_id}[/bold cyan] cloning completed.")
         return vm_id
     
 
@@ -280,3 +281,11 @@ class Proxmox:
                 self.wait_for(endpoint, lambda r: r.status_code == 403)
                 self.console.log(f"VM {vm_id} deleted.")
         self.console.log("All VMs deleted successfully.", style="bold green")
+
+
+    def edit_all(self) -> None:
+        ids = self.load_ids()
+        for vm_id in ids:
+            self.console.log(f"Editing VM {vm_id}...")
+            self.change_specs(vm_id)
+        self.console.log("All VMs edited successfully.", style="bold green")

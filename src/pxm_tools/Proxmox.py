@@ -43,6 +43,7 @@ class Proxmox:
             parser.set_defaults(**config)
         args, unknown = parser.parse_known_args()
         args = vars(args)
+        args.pop("config")
         for k, v in args.items():
             if v is None:
                 raise Exception(f"Missing required argument --{k}.")

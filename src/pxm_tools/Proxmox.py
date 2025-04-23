@@ -22,12 +22,10 @@ class Proxmox:
     def default_parser() -> argparse.ArgumentParser:
         parser = argparse.ArgumentParser(description="Proxmox API Wrapper")
         parser.add_argument("--config", type=str, help="Path to the config file", default=None)
-        parser.add_argument("--api", type=str, default=os.getenv("PM_API_URL"), help="Proxmox API URL")
         parser.add_argument("--user", type=str, default=os.getenv("PM_USER"), help="Proxmox user")
         parser.add_argument("--pass", type=str, default=os.getenv("PM_PASS"), help="Proxmox password")
-        parser.add_argument("--node", type=str, default=None, help="Proxmox node name")
-        parser.add_argument("--ids", type=str, default="ids.txt", help="File to save VM IDs")
-        parser.add_argument("--ips", type=str, default="ips.txt", help="File to save VM IPs")
+        parser.add_argument("--ids", type=str, default="ids.json", help="File to save VM IDs")
+        parser.add_argument("--ips", type=str, default="ips.json", help="File to save VM IPs")
         return parser
     
 
@@ -62,10 +60,8 @@ class Proxmox:
     def __init__(self, args: dict, **kwargs):
         self.console = Console()
         self.args: dict = {**args, **kwargs}
-        self.api: str = self.args["api"]
-        self.node: str = self.args["node"]
         self.headers: dict = {}
-        self.auth()
+        #self.auth()
 
 
     def request(self, method: str, endpoint: str, data: Any = None) -> requests.Response:
@@ -76,7 +72,7 @@ class Proxmox:
     def check_response(self, response: requests.Response) -> None:
         if response.status_code != 200:
             self.console.log(f"Error: {response.status_code}, {response.text}")
-            raise Exception(f"Request failed with status code {response.status_code}")
+            raise Exception(f"Request failed with status code {response.status_code}, {response.text}")
         
 
     def auth(self) -> None:
@@ -114,10 +110,10 @@ class Proxmox:
             "newid": vm_id,
             "name": vm_name,
             "target": self.node,
-            "pool": self.args["pool"],
+            "pool": self.pool,
             "full": 1,
         }
-        endpoint = f"/nodes/{self.node}/qemu/{self.args["template"]}/clone"
+        endpoint = f"/nodes/{self.node}/qemu/{self.template}/clone"
         response = self.request("post", endpoint, data=vm_data)
         self.check_response(response)
 
@@ -145,13 +141,13 @@ class Proxmox:
         return ",".join(f"{k}={v}" for k, v in value.items())
     
 
-    def change_specs(self, vm_id) -> None:
+    def change_specs(self, vm_id, specs) -> None:
         endpoint = f"/nodes/{self.node}/qemu/{vm_id}/config"
         response = self.request("get", endpoint)
         self.check_response(response)
         data = response.json()["data"]
         payload = {}
-        for k, v in self.args.items():
+        for k, v in specs.items():
             if not k.startswith("vm-"):
                 continue
             k = k[3:]
@@ -166,8 +162,11 @@ class Proxmox:
         if self.args.get("pubkey", None) is not None and Path(self.args["pubkey"]).exists():
             with open(self.args["pubkey"], "r") as f:
                 sshkey = f.read().strip()
-            sshkeys = urllib.parse.unquote(data["sshkeys"])
-            sshkeys = sshkeys + f"\n\n{sshkey}\n"
+            if "sshkeys" in data:
+                sshkeys = urllib.parse.unquote(data["sshkeys"])
+                sshkeys = sshkeys + f"\n\n{sshkey}\n"
+            else:
+                sshkeys = f"{sshkey}\n"
             sshkeys = urllib.parse.quote(sshkeys, safe="")
             payload["sshkeys"] = sshkeys
         response = self.request("put", endpoint, data=payload)
@@ -176,22 +175,34 @@ class Proxmox:
 
 
     def create_all_vms(self) -> None:
-        ids = []
-        self.console.log(f"Creating {self.args["number"]} VMs...")
-        for i in range(1, self.args["number"] + 1):
-            name = f"{self.args["prefix"]}-{i}"
-            vm_id = self.setup_vm(name)
-            self.change_specs(vm_id)
-            ids.append(vm_id)
+        ids = {}
+        counter = 1
+        for conf in self.args["vm_configs"]:
+            self.api = conf["api"]
+            self.node = conf["node"]
+            self.pool = conf["pool"]
+            self.template = conf["template"]
+            if self.node not in ids:
+                ids[self.node] = {"api": self.api, "ids":[]}
+
+            self.auth()
+            for vm_conf in conf["vms"]:
+                self.console.log(f"Creating a batch with {vm_conf["n_vms"]} VMs in node {self.node} ...")
+                for _ in range(vm_conf["n_vms"]):
+                    name = f"{self.args["prefix"]}-{counter}"
+                    vm_id = self.setup_vm(name)
+                    self.change_specs(vm_id, vm_conf)
+                    ids[self.node]["ids"].append(vm_id)
+                    counter += 1
+
         self.console.log("All VMs created successfully.", style="bold green")
         with open(self.args["ids"], "w") as f:
-            for vm_id in ids:
-                f.write(f"{vm_id}\n")
+            json.dump(ids, f, indent=2)
 
 
     def load_ids(self) -> list:
         with open(self.args["ids"], "r") as f:
-            ids = [int(line.strip()) for line in f.readlines()]
+            ids = json.load(f)
         return ids
 
 
@@ -223,70 +234,107 @@ class Proxmox:
 
     def start_all_vms(self) -> None:
         ids = self.load_ids()
-        ips = []
-        for vm_id in ids:
-            self.start_vm(vm_id)
+        ips = {}
+        for node in ids:
+            self.node = node
+            self.api = ids[node]["api"]
+            self.auth()
+            for vm_id in ids[node]["ids"]:
+                self.start_vm(vm_id)
+
         with self.console.status("Waiting for VMs to start..."):
-            for vm_id in ids:
-                endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
-                self.wait_for(endpoint, lambda r: r.json()["data"]["status"] == "running")
+            for node in ids:
+                self.node = node
+                self.api = ids[node]["api"]
+                self.auth()
+                for vm_id in ids[node]["ids"]:
+                    endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
+                    self.wait_for(endpoint, lambda r: r.json()["data"]["status"] == "running")                
+
         self.console.log("All VMs started successfully.", style="bold green")
         with self.console.status("Waiting for VM IPs..."):
-            for vm_id in ids:
-                ip = self.get_ip(vm_id)
-                ips.append(ip)
-                self.console.log(f"VM {vm_id} IP: {ip}")
+            for node in ids:
+                self.node = node
+                self.api = ids[node]["api"]
+                if self.node not in ips:
+                    ips[self.node] = {"api": self.api, "ips":[]}
+                self.auth()
+                for vm_id in ids[node]["ids"]:
+                    ip = self.get_ip(vm_id)
+                    ips[node]["ips"].append(ip)
+                    self.console.log(f"VM {vm_id} IP: {ip}")
+                
         self.console.log("All VM IPs retrieved successfully.", style="bold green")
         with open(self.args["ips"], "w") as f:
-            for ip in ips:
-                f.write(f"{ip}\n")
-
+            json.dump(ips, f, indent=2)
 
     def stop_all_vms(self) -> None:
         ids = self.load_ids()
-        for vm_id in ids:
-            endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
-            response = self.request("get", endpoint)
-            self.check_response(response)
-            if response.json()["data"]["status"] == "stopped":
-                self.console.log(f"VM {vm_id} is already stopped.")
-                continue
-            self.console.log(f"Stopping VM {vm_id}...")
-            endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/shutdown"
-            response = self.request("post", endpoint)
-            self.check_response(response)
+        for node in ids:
+            self.node = node
+            self.api = ids[node]["api"]
+            self.auth()
+            for vm_id in ids[node]["ids"]:
+                endpoint = f"/nodes/{node}/qemu/{vm_id}/status/current"
+                response = self.request("get", endpoint)
+                self.check_response(response)
+                if response.json()["data"]["status"] == "stopped":
+                    self.console.log(f"VM {vm_id} is already stopped.")
+                    continue
+                self.console.log(f"Stopping VM {vm_id}...")
+                endpoint = f"/nodes/{node}/qemu/{vm_id}/status/shutdown"
+                response = self.request("post", endpoint)
+                self.check_response(response)
+
         with self.console.status("Waiting for VMs to stop..."):
-            for vm_id in ids:
-                endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
-                self.wait_for(endpoint, lambda r: r.json()["data"]["status"] == "stopped")
+            for node in ids:
+                self.node = node
+                self.api = ids[node]["api"]
+                self.auth()
+                for vm_id in ids[node]["ids"]:
+                    endpoint = f"/nodes/{node}/qemu/{vm_id}/status/current"
+                    self.wait_for(endpoint, lambda r: r.json()["data"]["status"] == "stopped")
         self.console.log("All VMs stopped successfully.", style="bold green")
 
 
     def remove_all_vms(self) -> None:
         ids = self.load_ids()
         ignore_ids = []
-        for vm_id in ids:
-            endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
-            response = self.request("get", endpoint)
-            if response.status_code == 403:
-                self.console.log(f"VM {vm_id} does not exist.")
-                ignore_ids.append(vm_id)
-                continue
-            self.console.log(f"Deleting VM {vm_id}...")
-            endpoint = f"/nodes/{self.node}/qemu/{vm_id}?purge=0&destroy-unreferenced-disks=0"
-            response = self.request("delete", endpoint)
-            self.check_response(response)
-        with self.console.status("Waiting for VMs to be deleted..."):
-            for vm_id in sorted(set(ids) - set(ignore_ids)):
+        for node in ids:
+            self.node = node
+            self.api = ids[node]["api"]
+            self.auth()
+            for vm_id in ids[node]["ids"]:
                 endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
-                self.wait_for(endpoint, lambda r: r.status_code == 403)
-                self.console.log(f"VM {vm_id} deleted.")
+                response = self.request("get", endpoint)
+                if response.status_code == 403:
+                    self.console.log(f"VM {vm_id} does not exist.")
+                    ignore_ids.append(vm_id)
+                    continue
+                self.console.log(f"Deleting VM {vm_id}...")
+                endpoint = f"/nodes/{self.node}/qemu/{vm_id}?purge=0&destroy-unreferenced-disks=0"
+                response = self.request("delete", endpoint)
+                self.check_response(response)
+        with self.console.status("Waiting for VMs to be deleted..."):
+            for node in ids:
+                self.node = node
+                self.api = ids[node]["api"]
+                self.auth()
+                for vm_id in sorted(set(ids[node]["ids"]) - set(ignore_ids)):
+                    endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
+                    self.wait_for(endpoint, lambda r: r.status_code == 403)
+                    self.console.log(f"VM {vm_id} deleted.")
         self.console.log("All VMs deleted successfully.", style="bold green")
 
 
-    def edit_all(self) -> None:
+    def edit_all(self, specs) -> None:
         ids = self.load_ids()
-        for vm_id in ids:
-            self.console.log(f"Editing VM {vm_id}...")
-            self.change_specs(vm_id)
+        specs = json.load(specs)
+        for node in ids:
+            self.node = node
+            self.api = ids[node]["api"]
+            self.auth()
+            for vm_id in ids[node]["ids"]:
+                self.console.log(f"Editing VM {vm_id}...")
+                self.change_specs(vm_id, specs)
         self.console.log("All VMs edited successfully.", style="bold green")

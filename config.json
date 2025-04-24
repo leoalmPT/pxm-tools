@@ -3,7 +3,7 @@
     "prefix": "fl-worker",
     "vm_configs" : [
         {
-            "api": "https://bilbo.av.it.pt:8006/api2/json",
+            "api": "https://bilbo.av.it.pt:8006/",
             "node": "bilbo",
             "pool": "federatedLearning",
             "template": 1000,
@@ -14,8 +14,9 @@
                 "vm-net0/rate": 50,
                 "vm-net0/bridge": "vmbr1",
                 "vm-localtime": 1,
-                "vm-cores": 4,
-                "vm-memory": 4096
+                "vm-cores": 10,
+                "vm-memory": 8192,
+                "disk" : "64G"
                 },
                 {
                 "n_vms" : 2,
@@ -24,12 +25,13 @@
                 "vm-net0/bridge": "vmbr1",
                 "vm-localtime": 1,
                 "vm-cores": 2,
-                "vm-memory": 2048
+                "vm-memory": 2048,
+                "disk" : "64G"
                 }
             ]
         },
         {
-            "api": "https://hobbit.av.it.pt:8006/api2/json",
+            "api": "https://hobbit.av.it.pt:8006/",
             "node": "hobbit",
             "pool": "federatedLearning",
             "template": 4000,
@@ -41,13 +43,14 @@
                 "vm-net0/bridge": "vmbr1",
                 "vm-localtime": 1,
                 "vm-cores": 4,
-                "vm-memory": 4096
+                "vm-memory": 4096,
+                "disk" : "64G"
                 }
             ]
         },
         {
             "node": "atnog-test1",
-            "api": "https://atnog-test1.av.it.pt:8006/api2/json",
+            "api": "https://atnog-test1.av.it.pt:8006/",
             "pool": "rafaelgteixeira",
             "template": 1003,
             "vms" : [
@@ -58,7 +61,8 @@
                 "vm-net0/bridge": "vmbr1",
                 "vm-localtime": 1,
                 "vm-cores": 4,
-                "vm-memory": 4096
+                "vm-memory": 4096,
+                "disk" : "64G"
                 }
             ]
         }

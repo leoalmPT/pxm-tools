@@ -80,7 +80,7 @@ class Proxmox:
             "username": self.args["user"],
             "password": self.args["pass"],
         }
-        response = self.request("post", "/access/ticket", data=data)
+        response = self.request("post", "api2/json/access/ticket", data=data)
         self.check_response(response)
         data = response.json()["data"]
         self.console.log("Authenticated successfully.", style="bold green")
@@ -91,7 +91,7 @@ class Proxmox:
     
 
     def next_id(self) -> int:
-        response = self.request("get", "/cluster/nextid")
+        response = self.request("get", "api2/json/cluster/nextid")
         self.check_response(response)
         return response.json()["data"]
     
@@ -113,7 +113,7 @@ class Proxmox:
             "pool": self.pool,
             "full": 1,
         }
-        endpoint = f"/nodes/{self.node}/qemu/{self.template}/clone"
+        endpoint = f"api2/json/nodes/{self.node}/qemu/{self.template}/clone"
         response = self.request("post", endpoint, data=vm_data)
         self.check_response(response)
 
@@ -123,7 +123,7 @@ class Proxmox:
         self.clone_vm(vm_id, name)
         self.console.log(f"VM [bold cyan]{name}[/bold cyan] created with ID {vm_id}.")
         with self.console.status(f"Cloning VM {vm_id}..."):
-            endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
+            endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/current"
             self.wait_for(endpoint, lambda r: r.status_code != 403)
         self.console.log(f"VM [bold cyan]{vm_id}[/bold cyan] cloning completed.")
         return vm_id
@@ -142,14 +142,24 @@ class Proxmox:
     
 
     def change_specs(self, vm_id, specs) -> None:
-        endpoint = f"/nodes/{self.node}/qemu/{vm_id}/config"
+        endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/config"
         response = self.request("get", endpoint)
         self.check_response(response)
         data = response.json()["data"]
         payload = {}
         for k, v in specs.items():
             if not k.startswith("vm-"):
-                continue
+                if k == "disk":
+                    disk_endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/resize"
+                    disk_payload = {
+                        "disk" : "scsi0",
+                        "size" : v,
+                    }
+                    response = self.request("put", disk_endpoint, data=disk_payload)
+                    self.check_response(response)
+                    continue
+                else:
+                    continue
             k = k[3:]
             if "/" in k:
                 k, sub_k = k.split("/")
@@ -207,7 +217,7 @@ class Proxmox:
 
 
     def get_ip(self, vm_id) -> str:
-        endpoint = f"/nodes/{self.node}/qemu/{vm_id}/agent/network-get-interfaces"
+        endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/agent/network-get-interfaces"
         response = self.wait_for(endpoint, lambda r: r.status_code != 500)
         self.check_response(response)
         data = response.json()["data"]["result"]
@@ -220,13 +230,13 @@ class Proxmox:
     
 
     def start_vm(self, vm_id) -> None:
-        endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
+        endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/current"
         response = self.request("get", endpoint)
         self.check_response(response)
         if response.json()["data"]["status"] == "running":
             self.console.log(f"VM {vm_id} is already running.")
             return
-        endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/start"
+        endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/start"
         response = self.request("post", endpoint)
         self.check_response(response)
         self.console.log(f"VM {vm_id} is starting...")
@@ -248,7 +258,7 @@ class Proxmox:
                 self.api = ids[node]["api"]
                 self.auth()
                 for vm_id in ids[node]["ids"]:
-                    endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
+                    endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/current"
                     self.wait_for(endpoint, lambda r: r.json()["data"]["status"] == "running")                
 
         self.console.log("All VMs started successfully.", style="bold green")
@@ -268,6 +278,11 @@ class Proxmox:
         with open(self.args["ips"], "w") as f:
             json.dump(ips, f, indent=2)
 
+        with open(f"{self.args["ips"].split(".")[0]}.txt", "w") as f:
+            for node in ips:
+                for ip in ips[node]["ips"]:
+                    f.write(f"{ip}\n")
+
     def stop_all_vms(self) -> None:
         ids = self.load_ids()
         for node in ids:
@@ -275,14 +290,14 @@ class Proxmox:
             self.api = ids[node]["api"]
             self.auth()
             for vm_id in ids[node]["ids"]:
-                endpoint = f"/nodes/{node}/qemu/{vm_id}/status/current"
+                endpoint = f"api2/json/nodes/{node}/qemu/{vm_id}/status/current"
                 response = self.request("get", endpoint)
                 self.check_response(response)
                 if response.json()["data"]["status"] == "stopped":
                     self.console.log(f"VM {vm_id} is already stopped.")
                     continue
                 self.console.log(f"Stopping VM {vm_id}...")
-                endpoint = f"/nodes/{node}/qemu/{vm_id}/status/shutdown"
+                endpoint = f"api2/json/nodes/{node}/qemu/{vm_id}/status/shutdown"
                 response = self.request("post", endpoint)
                 self.check_response(response)
 
@@ -292,7 +307,7 @@ class Proxmox:
                 self.api = ids[node]["api"]
                 self.auth()
                 for vm_id in ids[node]["ids"]:
-                    endpoint = f"/nodes/{node}/qemu/{vm_id}/status/current"
+                    endpoint = f"api2/json/nodes/{node}/qemu/{vm_id}/status/current"
                     self.wait_for(endpoint, lambda r: r.json()["data"]["status"] == "stopped")
         self.console.log("All VMs stopped successfully.", style="bold green")
 
@@ -305,14 +320,14 @@ class Proxmox:
             self.api = ids[node]["api"]
             self.auth()
             for vm_id in ids[node]["ids"]:
-                endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
+                endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/current"
                 response = self.request("get", endpoint)
                 if response.status_code == 403:
                     self.console.log(f"VM {vm_id} does not exist.")
                     ignore_ids.append(vm_id)
                     continue
                 self.console.log(f"Deleting VM {vm_id}...")
-                endpoint = f"/nodes/{self.node}/qemu/{vm_id}?purge=0&destroy-unreferenced-disks=0"
+                endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}?purge=0&destroy-unreferenced-disks=0"
                 response = self.request("delete", endpoint)
                 self.check_response(response)
         with self.console.status("Waiting for VMs to be deleted..."):
@@ -321,7 +336,7 @@ class Proxmox:
                 self.api = ids[node]["api"]
                 self.auth()
                 for vm_id in sorted(set(ids[node]["ids"]) - set(ignore_ids)):
-                    endpoint = f"/nodes/{self.node}/qemu/{vm_id}/status/current"
+                    endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/current"
                     self.wait_for(endpoint, lambda r: r.status_code == 403)
                     self.console.log(f"VM {vm_id} deleted.")
         self.console.log("All VMs deleted successfully.", style="bold green")

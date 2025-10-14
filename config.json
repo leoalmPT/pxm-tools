@@ -14,8 +14,8 @@
                 "vm-net0/rate": 50,
                 "vm-net0/bridge": "vmbr1",
                 "vm-localtime": 1,
-                "vm-cores": 10,
-                "vm-memory": 8192,
+                "vm-cores": 8,
+                "vm-memory": 16384,
                 "disk" : "64G"
                 },
                 {
@@ -24,8 +24,44 @@
                 "vm-net0/rate": 100,
                 "vm-net0/bridge": "vmbr1",
                 "vm-localtime": 1,
-                "vm-cores": 2,
-                "vm-memory": 2048,
+                "vm-cores": 4,
+                "vm-memory": 8192,
+                "disk" : "64G"
+                }
+            ]
+        },
+        {
+            "api": "https://frodo.av.it.pt:8006/",
+            "node": "frodo",
+            "pool": "federatedLearning",
+            "template": 4000,
+            "vms" : [
+                {
+                "n_vms" : 2,
+                "vm-cipassword": "flexfl",
+                "vm-net0/rate": 50,
+                "vm-net0/bridge": "vmbr1",
+                "vm-localtime": 1,
+                "vm-cores": 8,
+                "vm-memory": 16384,
+                "disk" : "64G"
+                }
+            ]
+        },
+        {
+            "api": "https://samwise.av.it.pt:8006/",
+            "node": "samwise",
+            "pool": "federatedLearning",
+            "template": 4000,
+            "vms" : [
+                {
+                "n_vms" : 2,
+                "vm-cipassword": "flexfl",
+                "vm-net0/rate": 50,
+                "vm-net0/bridge": "vmbr1",
+                "vm-localtime": 1,
+                "vm-cores": 8,
+                "vm-memory": 16384,
                 "disk" : "64G"
                 }
             ]
@@ -42,8 +78,8 @@
                 "vm-net0/rate": 50,
                 "vm-net0/bridge": "vmbr1",
                 "vm-localtime": 1,
-                "vm-cores": 4,
-                "vm-memory": 4096,
+                "vm-cores": 8,
+                "vm-memory": 16384,
                 "disk" : "64G"
                 }
             ]
@@ -61,7 +97,7 @@
                 "vm-net0/bridge": "vmbr1",
                 "vm-localtime": 1,
                 "vm-cores": 4,
-                "vm-memory": 4096,
+                "vm-memory": 8192,
                 "disk" : "64G"
                 }
             ]

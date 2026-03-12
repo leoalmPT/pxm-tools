@@ -31,17 +31,112 @@ Some arguments can be used from environment variables or .env file.
 Options can be passed as a JSON file such as `--config config.json`
 
 ```json
+
 {
-    "node": "frodo",
     "prefix": "fl-worker",
-    "pool": "federatedLearning",
-    "template": 2000,
-    
-    "vm-cipassword": "flexfl",
-    "vm-net0/rate": 50,
-    "vm-net0/bridge": "vmbr1",
-    "vm-localtime": 1
-}
+    "vm_configs" : [
+        {
+            "api": "https://bilbo.av.it.pt:8006/",
+            "node": "bilbo",
+            "pool": "federatedLearning",
+            "template": 1000,
+            "vms" : [
+                {
+                "n_vms" : 2,
+                "vm-cipassword": "flexfl",
+                "vm-net0/rate": 50,
+                "vm-net0/bridge": "vmbr1",
+                "vm-localtime": 1,
+                "vm-cores": 8,
+                "vm-memory": 16384,
+                "disk" : "64G"
+                },
+                {
+                "n_vms" : 2,
+                "vm-cipassword": "flexfl",
+                "vm-net0/rate": 100,
+                "vm-net0/bridge": "vmbr1",
+                "vm-localtime": 1,
+                "vm-cores": 4,
+                "vm-memory": 8192,
+                "disk" : "64G"
+                }
+            ]
+        },
+        {
+            "api": "https://frodo.av.it.pt:8006/",
+            "node": "frodo",
+            "pool": "federatedLearning",
+            "template": 4000,
+            "vms" : [
+                {
+                "n_vms" : 2,
+                "vm-cipassword": "flexfl",
+                "vm-net0/rate": 50,
+                "vm-net0/bridge": "vmbr1",
+                "vm-localtime": 1,
+                "vm-cores": 8,
+                "vm-memory": 16384,
+                "disk" : "64G"
+                }
+            ]
+        },
+        {
+            "api": "https://samwise.av.it.pt:8006/",
+            "node": "samwise",
+            "pool": "federatedLearning",
+            "template": 4000,
+            "vms" : [
+                {
+                "n_vms" : 2,
+                "vm-cipassword": "flexfl",
+                "vm-net0/rate": 50,
+                "vm-net0/bridge": "vmbr1",
+                "vm-localtime": 1,
+                "vm-cores": 8,
+                "vm-memory": 16384,
+                "disk" : "64G"
+                }
+            ]
+        },
+        {
+            "api": "https://hobbit.av.it.pt:8006/",
+            "node": "hobbit",
+            "pool": "federatedLearning",
+            "template": 4000,
+            "vms" : [
+                {
+                "n_vms" : 2,
+                "vm-cipassword": "flexfl",
+                "vm-net0/rate": 50,
+                "vm-net0/bridge": "vmbr1",
+                "vm-localtime": 1,
+                "vm-cores": 8,
+                "vm-memory": 16384,
+                "disk" : "64G"
+                }
+            ]
+        },
+        {
+            "node": "atnog-test1",
+            "api": "https://atnog-test1.av.it.pt:8006/",
+            "pool": "rafaelgteixeira",
+            "template": 1003,
+            "vms" : [
+                {
+                "n_vms" : 2,
+                "vm-cipassword": "flexfl",
+                "vm-net0/rate": 50,
+                "vm-net0/bridge": "vmbr1",
+                "vm-localtime": 1,
+                "vm-cores": 4,
+                "vm-memory": 8192,
+                "disk" : "64G"
+                }
+            ]
+        }
+    ]
+    }
 ```
 
 

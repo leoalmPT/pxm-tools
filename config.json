@@ -34,7 +34,7 @@
             "api": "https://frodo.av.it.pt:8006/",
             "node": "frodo",
             "pool": "federatedLearning",
-            "template": 4000,
+            "template": 2000,
             "vms" : [
                 {
                 "n_vms" : 2,
@@ -52,7 +52,7 @@
             "api": "https://samwise.av.it.pt:8006/",
             "node": "samwise",
             "pool": "federatedLearning",
-            "template": 4000,
+            "template": 3000,
             "vms" : [
                 {
                 "n_vms" : 2,

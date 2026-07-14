@@ -17,6 +17,8 @@ class Proxmox:
 
     INSECURE = True 
     SLEEP = 5
+    REQUEST_TIMEOUT = 30   # seconds, per-call connect+read timeout
+    WAIT_TIMEOUT = 600     # seconds, overall deadline for one wait_for poll loop
 
     @staticmethod
     def default_parser() -> argparse.ArgumentParser:
@@ -66,7 +68,7 @@ class Proxmox:
 
     def request(self, method: str, endpoint: str, data: Any = None) -> requests.Response:
         url = f"{self.api}{endpoint}"
-        return getattr(requests, method.lower())(url, headers=self.headers, data=data, verify=not Proxmox.INSECURE)
+        return getattr(requests, method.lower())(url, headers=self.headers, data=data, verify=not Proxmox.INSECURE, timeout=Proxmox.REQUEST_TIMEOUT)
 
 
     def check_response(self, response: requests.Response) -> None:
@@ -97,12 +99,17 @@ class Proxmox:
     
 
     def wait_for(self, endpoint: str, fn: Callable[[requests.Response], bool]) -> requests.Response:
+        deadline = time.monotonic() + Proxmox.WAIT_TIMEOUT
         while True:
-            response = self.request("get", endpoint)
-            if fn(response):
-                break
+            try:
+                response = self.request("get", endpoint)
+                if fn(response):
+                    return response
+            except requests.exceptions.RequestException as e:
+                self.console.log(f"Transient error polling {endpoint}: {e}; retrying...")
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"wait_for timed out after {Proxmox.WAIT_TIMEOUT}s polling {endpoint}")
             time.sleep(Proxmox.SLEEP)
-        return response
     
 
     def clone_vm(self, vm_id, vm_name) -> None:
@@ -184,6 +191,11 @@ class Proxmox:
         self.console.log(f"VM {vm_id} specs changed.")
 
 
+    def _save_ids(self, ids: dict) -> None:
+        with open(self.args["ids"], "w") as f:
+            json.dump(ids, f, indent=2)
+
+
     def create_all_vms(self) -> None:
         ids = {}
         counter = 1
@@ -201,13 +213,13 @@ class Proxmox:
                 for _ in range(vm_conf["n_vms"]):
                     name = f"{self.args["prefix"]}-{counter}"
                     vm_id = self.setup_vm(name)
-                    self.change_specs(vm_id, vm_conf)
                     ids[self.node]["ids"].append(vm_id)
+                    self._save_ids(ids)
+                    self.change_specs(vm_id, vm_conf)
                     counter += 1
 
         self.console.log("All VMs created successfully.", style="bold green")
-        with open(self.args["ids"], "w") as f:
-            json.dump(ids, f, indent=2)
+        self._save_ids(ids)
 
 
     def load_ids(self) -> list:
@@ -323,9 +335,12 @@ class Proxmox:
                 endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/current"
                 response = self.request("get", endpoint)
                 if response.status_code == 403:
-                    self.console.log(f"VM {vm_id} does not exist.")
-                    ignore_ids.append(vm_id)
-                    continue
+                    self.auth()
+                    response = self.request("get", endpoint)
+                    if response.status_code == 403:
+                        self.console.log(f"VM {vm_id} does not exist (403 after re-auth).")
+                        ignore_ids.append(vm_id)
+                        continue
                 self.console.log(f"Deleting VM {vm_id}...")
                 endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}?purge=0&destroy-unreferenced-disks=0"
                 response = self.request("delete", endpoint)

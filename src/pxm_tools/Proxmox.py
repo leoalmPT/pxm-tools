@@ -103,10 +103,11 @@ class Proxmox:
         while True:
             try:
                 response = self.request("get", endpoint)
-                if fn(response):
-                    return response
             except requests.exceptions.RequestException as e:
                 self.console.log(f"Transient error polling {endpoint}: {e}; retrying...")
+            else:
+                if fn(response):
+                    return response
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"wait_for timed out after {Proxmox.WAIT_TIMEOUT}s polling {endpoint}")
             time.sleep(Proxmox.SLEEP)

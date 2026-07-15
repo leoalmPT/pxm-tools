@@ -59,6 +59,20 @@ class TestWaitFor(unittest.TestCase):
         self.assertEqual(mock_sleep.call_count, 2)
         self.assertEqual(px.request.call_count, 3)
 
+    def test_wait_for_surfaces_predicate_error(self):
+        px = Proxmox(args={})
+        response = MagicMock(status_code=200)
+
+        def bad_predicate(_r):
+            raise requests.exceptions.JSONDecodeError("Expecting value", "", 0)
+
+        with patch.object(px, "request", return_value=response), \
+             patch("pxm_tools.Proxmox.time.monotonic", return_value=0), \
+             patch("pxm_tools.Proxmox.time.sleep") as mock_sleep:
+            with self.assertRaises(requests.exceptions.JSONDecodeError):
+                px.wait_for("api2/json/nodes/x/qemu/1/status/current", bad_predicate)
+        mock_sleep.assert_not_called()
+
 
 class TestSaveIdsAtomic(unittest.TestCase):
     def test_save_ids_preserves_existing_file_on_write_failure(self):

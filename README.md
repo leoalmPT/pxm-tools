@@ -162,3 +162,11 @@ uv run pxm-rm --ids ids.json
 - VM cloning (`pxm-create`) is sequential — one at a time per Proxmox constraint.
 - Start, stop, and remove operations are issued in bulk then waited on in parallel.
 - `pxm-start` polls the QEMU guest agent for each VM's `eth0` IPv4 address before writing IPs.
+
+## Running tests
+
+The unit tests are stdlib `unittest` (mocked — no live Proxmox, no extra dependencies):
+
+```bash
+uv run python -m unittest discover -s tests -v
+```

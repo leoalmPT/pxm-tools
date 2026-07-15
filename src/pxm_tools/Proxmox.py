@@ -125,15 +125,18 @@ class Proxmox:
         self.check_response(response)
 
 
-    def setup_vm(self, name) -> int:
+    def create_vm(self, name) -> int:
         vm_id = self.next_id()
         self.clone_vm(vm_id, name)
         self.console.log(f"VM [bold cyan]{name}[/bold cyan] created with ID {vm_id}.")
+        return vm_id
+
+
+    def wait_for_clone(self, vm_id) -> None:
         with self.console.status(f"Cloning VM {vm_id}..."):
             endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/current"
             self.wait_for(endpoint, lambda r: r.status_code != 403)
         self.console.log(f"VM [bold cyan]{vm_id}[/bold cyan] cloning completed.")
-        return vm_id
     
 
     def decode_value(self, value: str) -> dict:
@@ -192,8 +195,18 @@ class Proxmox:
 
 
     def _save_ids(self, ids: dict) -> None:
-        with open(self.args["ids"], "w") as f:
-            json.dump(ids, f, indent=2)
+        target = self.args["ids"]
+        tmp_path = f"{target}.tmp"
+        try:
+            with open(tmp_path, "w") as f:
+                json.dump(ids, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, target)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
 
 
     def create_all_vms(self) -> None:
@@ -212,9 +225,10 @@ class Proxmox:
                 self.console.log(f"Creating a batch with {vm_conf["n_vms"]} VMs in node {self.node} ...")
                 for _ in range(vm_conf["n_vms"]):
                     name = f"{self.args["prefix"]}-{counter}"
-                    vm_id = self.setup_vm(name)
+                    vm_id = self.create_vm(name)
                     ids[self.node]["ids"].append(vm_id)
                     self._save_ids(ids)
+                    self.wait_for_clone(vm_id)
                     self.change_specs(vm_id, vm_conf)
                     counter += 1
 

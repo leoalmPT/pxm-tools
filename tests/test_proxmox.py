@@ -60,6 +60,29 @@ class TestWaitFor(unittest.TestCase):
         self.assertEqual(px.request.call_count, 3)
 
 
+class TestSaveIdsAtomic(unittest.TestCase):
+    def test_save_ids_preserves_existing_file_on_write_failure(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ids_path = os.path.join(tmp_dir, "ids.json")
+            with open(ids_path, "w") as f:
+                json.dump({"old": True}, f)
+
+            px = Proxmox(args={"ids": ids_path})
+
+            with patch("pxm_tools.Proxmox.json.dump", side_effect=RuntimeError("boom")):
+                with self.assertRaises(RuntimeError):
+                    px._save_ids({"new": [1, 2]})
+
+            with open(ids_path) as f:
+                saved = json.load(f)
+            self.assertEqual(saved, {"old": True})
+
+            leftover_tmp_files = [
+                name for name in os.listdir(tmp_dir) if name != "ids.json"
+            ]
+            self.assertEqual(leftover_tmp_files, [])
+
+
 class TestCreateAllVmsIncrementalPersistence(unittest.TestCase):
     def test_create_all_vms_persists_ids_before_change_specs_failure(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -75,7 +98,8 @@ class TestCreateAllVmsIncrementalPersistence(unittest.TestCase):
             ]
             px = Proxmox(args={"vm_configs": vm_configs, "prefix": "test", "ids": ids_path})
             px.auth = MagicMock()
-            px.setup_vm = MagicMock(side_effect=[101, 102])
+            px.create_vm = MagicMock(side_effect=[101, 102])
+            px.wait_for_clone = MagicMock()
             px.change_specs = MagicMock(side_effect=[None, Exception("boom")])
 
             with self.assertRaises(Exception):
@@ -84,6 +108,34 @@ class TestCreateAllVmsIncrementalPersistence(unittest.TestCase):
             with open(ids_path) as f:
                 saved = json.load(f)
             self.assertEqual(saved["node1"]["ids"], [101, 102])
+
+
+class TestCreateAllVmsOrphanWindow(unittest.TestCase):
+    def test_id_persisted_when_clone_wait_times_out(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ids_path = os.path.join(tmp_dir, "ids.json")
+            vm_configs = [
+                {
+                    "api": "https://node1:8006/",
+                    "node": "node1",
+                    "pool": "pool1",
+                    "template": 9000,
+                    "vms": [{"n_vms": 1}],
+                }
+            ]
+            px = Proxmox(args={"vm_configs": vm_configs, "prefix": "test", "ids": ids_path})
+            px.auth = MagicMock()
+            px.create_vm = MagicMock(side_effect=[101])
+            px.wait_for_clone = MagicMock(side_effect=TimeoutError("boom"))
+            px.change_specs = MagicMock()
+
+            with self.assertRaises(TimeoutError):
+                px.create_all_vms()
+
+            with open(ids_path) as f:
+                saved = json.load(f)
+            self.assertEqual(saved["node1"]["ids"], [101])
+            px.change_specs.assert_not_called()
 
 
 class TestRemoveAllVms403Retry(unittest.TestCase):

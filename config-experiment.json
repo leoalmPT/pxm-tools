@@ -1,0 +1,77 @@
+{
+    "prefix": "fl-worker",
+    "vm_configs": [
+        {
+            "node": "atnog-test1",
+            "api": "https://atnog-test1.av.it.pt:8006/",
+            "pool": "rafaelgteixeira",
+            "template": 1003,
+            "vms": [
+                {
+                    "n_vms": 8,
+                    "vm-cipassword": "flexfl",
+                    "vm-net0/rate": 50,
+                    "vm-net0/bridge": "vmbr0",
+                    "vm-localtime": 1,
+                    "vm-cores": 2,
+                    "vm-memory": 32768,
+                    "disk": "64G"
+                }
+            ]
+        },
+        {
+            "api": "https://hobbit.av.it.pt:8006/",
+            "node": "hobbit",
+            "pool": "federatedLearning",
+            "template": 4000,
+            "vms": [
+                {
+                    "n_vms": 16,
+                    "vm-cipassword": "flexfl",
+                    "vm-net0/rate": 50,
+                    "vm-net0/bridge": "vmbr1",
+                    "vm-localtime": 1,
+                    "vm-cores": 3,
+                    "vm-memory": 16384,
+                    "disk": "64G"
+                }
+            ]
+        },
+        {
+            "api": "https://samwise.av.it.pt:8006/",
+            "node": "samwise",
+            "pool": "federatedLearning",
+            "template": 3000,
+            "vms": [
+                {
+                    "n_vms": 32,
+                    "vm-cipassword": "flexfl",
+                    "vm-net0/rate": 50,
+                    "vm-net0/bridge": "vmbr1",
+                    "vm-localtime": 1,
+                    "vm-cores": 4,
+                    "vm-memory": 12288,
+                    "disk": "64G"
+                }
+            ]
+        },
+        {
+            "api": "https://frodo.av.it.pt:8006/",
+            "node": "frodo",
+            "pool": "federatedLearning",
+            "template": 2000,
+            "vms": [
+                {
+                    "n_vms": 1,
+                    "vm-cipassword": "flexfl",
+                    "vm-net0/rate": 50,
+                    "vm-net0/bridge": "vmbr1",
+                    "vm-localtime": 1,
+                    "vm-cores": 32,
+                    "vm-memory": 65536,
+                    "disk": "256G"
+                }
+            ]
+        }
+    ]
+}

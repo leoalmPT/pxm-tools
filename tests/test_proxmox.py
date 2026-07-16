@@ -188,6 +188,7 @@ class TestCreateAllVmsCipassword(unittest.TestCase):
         px.create_vm = MagicMock(side_effect=[101])
         px.wait_for_clone = MagicMock()
         px.change_specs = MagicMock()
+        px.console = MagicMock()
         return px
 
     def test_create_all_vms_injects_cipassword_from_env(self):
@@ -201,6 +202,13 @@ class TestCreateAllVmsCipassword(unittest.TestCase):
             specs = px.change_specs.call_args.args[1]
             self.assertEqual(specs["vm-cipassword"], "s3cret-pw")
             self.assertEqual(specs["vm-cores"], 2)
+            self.assertFalse(
+                any(
+                    "PM_CIPASSWORD" in str(c.args[0])
+                    for c in px.console.log.call_args_list
+                    if c.args
+                )
+            )
 
     def test_create_all_vms_omits_cipassword_when_env_unset(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -215,6 +223,12 @@ class TestCreateAllVmsCipassword(unittest.TestCase):
             specs = px.change_specs.call_args.args[1]
             self.assertNotIn("vm-cipassword", specs)
             self.assertEqual(specs["vm-cores"], 2)
+            warn_calls = [
+                c
+                for c in px.console.log.call_args_list
+                if c.args and "PM_CIPASSWORD" in str(c.args[0])
+            ]
+            self.assertEqual(len(warn_calls), 1)
 
 
 class TestRemoveAllVms403Retry(unittest.TestCase):
@@ -236,7 +250,7 @@ class TestRemoveAllVms403Retry(unittest.TestCase):
             ]
         )
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(Exception, "persistently returned 403"):
             px.remove_all_vms()
 
         self.assertEqual(px.request.call_count, 2)
@@ -265,12 +279,36 @@ class TestRemoveAllVms403Retry(unittest.TestCase):
         )
         self.assertEqual(px.auth.call_count, 3)
 
+    def test_persistent_403_vm_skipped_but_sibling_still_deleted(self):
+        px = Proxmox(args={"ids": "ids.json"})
+        px.load_ids = MagicMock(
+            return_value={"node1": {"api": "https://node1:8006/", "ids": [101, 102]}}
+        )
+        px.auth = MagicMock()
+        px.wait_for = MagicMock()
+        px.request = MagicMock(
+            side_effect=[
+                MagicMock(status_code=403),
+                MagicMock(status_code=403),
+                MagicMock(status_code=200),
+                MagicMock(status_code=200),
+            ]
+        )
+
+        with self.assertRaisesRegex(Exception, "persistently returned 403"):
+            px.remove_all_vms()
+
+        delete_calls = [c for c in px.request.call_args_list if c.args[0] == "delete"]
+        self.assertEqual(len(delete_calls), 1)
+        self.assertIn("102", delete_calls[0].args[1])
+        self.assertFalse(any("101" in c.args[1] for c in delete_calls))
+
 
 class TestParseArgsRejectsUnknown(unittest.TestCase):
     def test_parse_args_rejects_unknown_arguments(self):
         argv = ["prog", "--user", "u", "--pass", "p", "--bogus", "x"]
         with patch.object(sys, "argv", argv):
-            with self.assertRaises(Exception):
+            with self.assertRaisesRegex(Exception, "Unknown argument"):
                 Proxmox.parse_args(Proxmox.default_parser())
 
 

@@ -15,10 +15,14 @@ load_dotenv()
 
 class Proxmox:
 
-    INSECURE = True 
     SLEEP = 5
     REQUEST_TIMEOUT = 30   # seconds, per-call connect+read timeout
     WAIT_TIMEOUT = 600     # seconds, overall deadline for one wait_for poll loop
+
+    @staticmethod
+    def _tls_verify() -> bool:
+        return os.getenv("PM_VERIFY_TLS", "false").strip().lower() in ("1", "true", "yes")
+
 
     @staticmethod
     def default_parser() -> argparse.ArgumentParser:
@@ -47,15 +51,8 @@ class Proxmox:
         for k, v in args.items():
             if v is None:
                 raise Exception(f"Missing required argument --{k}.")
-        for i, arg in enumerate(unknown):
-            if arg.startswith("--"):
-                key = arg[2:]
-                if i + 1 >= len(unknown) or unknown[i + 1].startswith("--"):
-                    raise Exception(f"Missing value for argument {arg}")
-                value = unknown[i + 1]
-                if value.isdigit():
-                    value = int(value)
-                args[key] = value
+        if unknown:
+            raise Exception(f"Unknown argument(s): {' '.join(unknown)}")
         return args
 
 
@@ -68,7 +65,7 @@ class Proxmox:
 
     def request(self, method: str, endpoint: str, data: Any = None) -> requests.Response:
         url = f"{self.api}{endpoint}"
-        return getattr(requests, method.lower())(url, headers=self.headers, data=data, verify=not Proxmox.INSECURE, timeout=Proxmox.REQUEST_TIMEOUT)
+        return getattr(requests, method.lower())(url, headers=self.headers, data=data, verify=Proxmox._tls_verify(), timeout=Proxmox.REQUEST_TIMEOUT)
 
 
     def check_response(self, response: requests.Response) -> None:
@@ -213,6 +210,12 @@ class Proxmox:
     def create_all_vms(self) -> None:
         ids = {}
         counter = 1
+        cipassword = os.getenv("PM_CIPASSWORD")
+        if not cipassword:
+            self.console.log(
+                "PM_CIPASSWORD not set: VMs will have no cloud-init password (SSH-key access only).",
+                style="bold red",
+            )
         for conf in self.args["vm_configs"]:
             self.api = conf["api"]
             self.node = conf["node"]
@@ -230,7 +233,8 @@ class Proxmox:
                     ids[self.node]["ids"].append(vm_id)
                     self._save_ids(ids)
                     self.wait_for_clone(vm_id)
-                    self.change_specs(vm_id, vm_conf)
+                    specs = {**vm_conf, "vm-cipassword": cipassword} if cipassword else vm_conf
+                    self.change_specs(vm_id, specs)
                     counter += 1
 
         self.console.log("All VMs created successfully.", style="bold green")
@@ -342,6 +346,7 @@ class Proxmox:
     def remove_all_vms(self) -> None:
         ids = self.load_ids()
         ignore_ids = []
+        ambiguous_403 = []
         for node in ids:
             self.node = node
             self.api = ids[node]["api"]
@@ -353,7 +358,10 @@ class Proxmox:
                     self.auth()
                     response = self.request("get", endpoint)
                     if response.status_code == 403:
-                        self.console.log(f"VM {vm_id} does not exist (403 after re-auth).")
+                        self.console.log(
+                            f"[bold red]VM {vm_id}: persistent 403 after re-auth — permission-denied OR nonexistent; NOT deleting. Verify against Proxmox manually.[/bold red]"
+                        )
+                        ambiguous_403.append(vm_id)
                         ignore_ids.append(vm_id)
                         continue
                 self.console.log(f"Deleting VM {vm_id}...")
@@ -370,16 +378,7 @@ class Proxmox:
                     self.wait_for(endpoint, lambda r: r.status_code == 403)
                     self.console.log(f"VM {vm_id} deleted.")
         self.console.log("All VMs deleted successfully.", style="bold green")
-
-
-    def edit_all(self, specs) -> None:
-        ids = self.load_ids()
-        specs = json.load(specs)
-        for node in ids:
-            self.node = node
-            self.api = ids[node]["api"]
-            self.auth()
-            for vm_id in ids[node]["ids"]:
-                self.console.log(f"Editing VM {vm_id}...")
-                self.change_specs(vm_id, specs)
-        self.console.log("All VMs edited successfully.", style="bold green")
+        if ambiguous_403:
+            raise Exception(
+                f"VM(s) {ambiguous_403} persistently returned 403 after re-auth and were NOT deleted; verify against Proxmox manually."
+            )

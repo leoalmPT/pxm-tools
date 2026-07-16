@@ -9,7 +9,6 @@
             "vms": [
                 {
                     "n_vms": 8,
-                    "vm-cipassword": "flexfl",
                     "vm-net0/rate": 50,
                     "vm-net0/bridge": "vmbr0",
                     "vm-localtime": 1,
@@ -27,7 +26,6 @@
             "vms": [
                 {
                     "n_vms": 16,
-                    "vm-cipassword": "flexfl",
                     "vm-net0/rate": 50,
                     "vm-net0/bridge": "vmbr1",
                     "vm-localtime": 1,
@@ -45,7 +43,6 @@
             "vms": [
                 {
                     "n_vms": 32,
-                    "vm-cipassword": "flexfl",
                     "vm-net0/rate": 50,
                     "vm-net0/bridge": "vmbr1",
                     "vm-localtime": 1,
@@ -63,7 +60,6 @@
             "vms": [
                 {
                     "n_vms": 1,
-                    "vm-cipassword": "flexfl",
                     "vm-net0/rate": 50,
                     "vm-net0/bridge": "vmbr1",
                     "vm-localtime": 1,

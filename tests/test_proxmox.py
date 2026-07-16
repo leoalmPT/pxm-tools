@@ -200,5 +200,38 @@ class TestRemoveAllVms403Retry(unittest.TestCase):
         self.assertEqual(px.auth.call_count, 3)
 
 
+class TestStartAllVmsPositionalAlignment(unittest.TestCase):
+    def test_ips_json_aligns_positionally_with_ids_json(self):
+        ids = {
+            "frodo": {"api": "https://frodo:8006/", "ids": [104]},
+            "hobbit": {"api": "https://hobbit:8006/", "ids": [108, 109, 110]},
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ips_path = os.path.join(tmp_dir, "ips.json")
+            px = Proxmox(args={"ips": ips_path})
+            px.load_ids = MagicMock(return_value=ids)
+            px.auth = MagicMock()
+            px.start_vm = MagicMock()
+            px.wait_for = MagicMock()
+            px.get_ip = MagicMock(side_effect=lambda vm_id: f"10.0.0.{vm_id}")
+
+            px.start_all_vms()
+
+            with open(ips_path) as f:
+                ips = json.load(f)
+            with open(os.path.join(tmp_dir, "ips.txt")) as f:
+                txt_lines = f.read().splitlines()
+
+        self.assertEqual(set(ips), set(ids))
+        for node in ids:
+            self.assertEqual(ips[node]["api"], ids[node]["api"])
+            self.assertEqual(len(ips[node]["ips"]), len(ids[node]["ids"]))
+            for i, vm_id in enumerate(ids[node]["ids"]):
+                self.assertEqual(ips[node]["ips"][i], f"10.0.0.{vm_id}")
+
+        expected_txt = [f"10.0.0.{vm_id}" for node in ids for vm_id in ids[node]["ids"]]
+        self.assertEqual(txt_lines, expected_txt)
+
+
 if __name__ == "__main__":
     unittest.main()

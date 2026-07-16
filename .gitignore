@@ -1,5 +1,7 @@
 ips.txt
 ids.txt
+ips.json
+ids.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

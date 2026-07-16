@@ -16,7 +16,6 @@ dependencies = [
 [project.scripts]
 pxm = "pxm_tools.cli.help:main"
 pxm-create = "pxm_tools.cli.create:main"
-pxm-edit = "pxm_tools.cli.edit:main"
 pxm-rm = "pxm_tools.cli.remove:main"
 pxm-start = "pxm_tools.cli.start:main"
 pxm-stop = "pxm_tools.cli.stop:main"

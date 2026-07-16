@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
@@ -23,7 +24,25 @@ class TestRequestTimeout(unittest.TestCase):
             "https://proxmox.example:8006/api2/json/cluster/nextid",
             headers=px.headers,
             data=None,
-            verify=not Proxmox.INSECURE,
+            verify=False,
+            timeout=Proxmox.REQUEST_TIMEOUT,
+        )
+
+    def test_request_verifies_tls_when_env_set(self):
+        px = Proxmox(args={})
+        px.api = "https://proxmox.example:8006/"
+        px.headers = {"Authorization": "PVEAuthCookie=abc"}
+
+        with patch("requests.get") as mock_get, \
+             patch.dict(os.environ, {"PM_VERIFY_TLS": "true"}):
+            mock_get.return_value = MagicMock(status_code=200)
+            px.request("get", "api2/json/cluster/nextid")
+
+        mock_get.assert_called_once_with(
+            "https://proxmox.example:8006/api2/json/cluster/nextid",
+            headers=px.headers,
+            data=None,
+            verify=True,
             timeout=Proxmox.REQUEST_TIMEOUT,
         )
 
@@ -152,6 +171,66 @@ class TestCreateAllVmsOrphanWindow(unittest.TestCase):
             px.change_specs.assert_not_called()
 
 
+class TestCreateAllVmsCipassword(unittest.TestCase):
+    def _make_proxmox(self, tmp_dir):
+        ids_path = os.path.join(tmp_dir, "ids.json")
+        vm_configs = [
+            {
+                "api": "https://node1:8006/",
+                "node": "node1",
+                "pool": "pool1",
+                "template": 9000,
+                "vms": [{"n_vms": 1, "vm-cores": 2}],
+            }
+        ]
+        px = Proxmox(args={"vm_configs": vm_configs, "prefix": "test", "ids": ids_path})
+        px.auth = MagicMock()
+        px.create_vm = MagicMock(side_effect=[101])
+        px.wait_for_clone = MagicMock()
+        px.change_specs = MagicMock()
+        px.console = MagicMock()
+        return px
+
+    def test_create_all_vms_injects_cipassword_from_env(self):
+        with tempfile.TemporaryDirectory() as tmp_dir, \
+             patch.dict(os.environ, {"PM_CIPASSWORD": "s3cret-pw"}):
+            px = self._make_proxmox(tmp_dir)
+
+            px.create_all_vms()
+
+            px.change_specs.assert_called_once()
+            specs = px.change_specs.call_args.args[1]
+            self.assertEqual(specs["vm-cipassword"], "s3cret-pw")
+            self.assertEqual(specs["vm-cores"], 2)
+            self.assertFalse(
+                any(
+                    "PM_CIPASSWORD" in str(c.args[0])
+                    for c in px.console.log.call_args_list
+                    if c.args
+                )
+            )
+
+    def test_create_all_vms_omits_cipassword_when_env_unset(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            env = dict(os.environ)
+            env.pop("PM_CIPASSWORD", None)
+            with patch.dict(os.environ, env, clear=True):
+                px = self._make_proxmox(tmp_dir)
+
+                px.create_all_vms()
+
+            px.change_specs.assert_called_once()
+            specs = px.change_specs.call_args.args[1]
+            self.assertNotIn("vm-cipassword", specs)
+            self.assertEqual(specs["vm-cores"], 2)
+            warn_calls = [
+                c
+                for c in px.console.log.call_args_list
+                if c.args and "PM_CIPASSWORD" in str(c.args[0])
+            ]
+            self.assertEqual(len(warn_calls), 1)
+
+
 class TestRemoveAllVms403Retry(unittest.TestCase):
     def _make_proxmox(self):
         px = Proxmox(args={"ids": "ids.json"})
@@ -171,7 +250,8 @@ class TestRemoveAllVms403Retry(unittest.TestCase):
             ]
         )
 
-        px.remove_all_vms()
+        with self.assertRaisesRegex(Exception, "persistently returned 403"):
+            px.remove_all_vms()
 
         self.assertEqual(px.request.call_count, 2)
         delete_calls = [c for c in px.request.call_args_list if c.args[0] == "delete"]
@@ -198,6 +278,38 @@ class TestRemoveAllVms403Retry(unittest.TestCase):
             "api2/json/nodes/node1/qemu/101?purge=0&destroy-unreferenced-disks=0",
         )
         self.assertEqual(px.auth.call_count, 3)
+
+    def test_persistent_403_vm_skipped_but_sibling_still_deleted(self):
+        px = Proxmox(args={"ids": "ids.json"})
+        px.load_ids = MagicMock(
+            return_value={"node1": {"api": "https://node1:8006/", "ids": [101, 102]}}
+        )
+        px.auth = MagicMock()
+        px.wait_for = MagicMock()
+        px.request = MagicMock(
+            side_effect=[
+                MagicMock(status_code=403),
+                MagicMock(status_code=403),
+                MagicMock(status_code=200),
+                MagicMock(status_code=200),
+            ]
+        )
+
+        with self.assertRaisesRegex(Exception, "persistently returned 403"):
+            px.remove_all_vms()
+
+        delete_calls = [c for c in px.request.call_args_list if c.args[0] == "delete"]
+        self.assertEqual(len(delete_calls), 1)
+        self.assertIn("102", delete_calls[0].args[1])
+        self.assertFalse(any("101" in c.args[1] for c in delete_calls))
+
+
+class TestParseArgsRejectsUnknown(unittest.TestCase):
+    def test_parse_args_rejects_unknown_arguments(self):
+        argv = ["prog", "--user", "u", "--pass", "p", "--bogus", "x"]
+        with patch.object(sys, "argv", argv):
+            with self.assertRaisesRegex(Exception, "Unknown argument"):
+                Proxmox.parse_args(Proxmox.default_parser())
 
 
 class TestStartAllVmsPositionalAlignment(unittest.TestCase):

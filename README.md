@@ -15,7 +15,6 @@ CLI toolkit for managing Proxmox VM lifecycle: cloning from templates, configuri
 | `uv run pxm-start` | Start VMs and collect their IPs |
 | `uv run pxm-stop` | Gracefully shut down VMs |
 | `uv run pxm-rm` | Delete VMs |
-| `uv run pxm-edit` | Edit specs of existing VMs |
 
 All commands share a common set of flags:
 
@@ -42,6 +41,8 @@ Credentials are read from a `.env` file in the working directory:
 |---|---|
 | `PM_USER` | Proxmox username (e.g. `user@pam`) |
 | `PM_PASS` | Proxmox password |
+| `PM_CIPASSWORD` | Cloud-init password injected into VMs created by `pxm-create` (unset → no password, SSH-key access only) |
+| `PM_VERIFY_TLS` | Verify the Proxmox API's TLS certificate (`true`/`false`, default `false`) |
 
 ## Config File
 
@@ -59,7 +60,6 @@ Pass a JSON config to `pxm-create` via `--config`. Each entry in `vm_configs` ta
       "vms": [
         {
           "n_vms": 8,
-          "vm-cipassword": "flexfl",
           "vm-net0/bridge": "vmbr1",
           "vm-localtime": 1,
           "vm-cores": 2,
@@ -76,7 +76,6 @@ Pass a JSON config to `pxm-create` via `--config`. Each entry in `vm_configs` ta
       "vms": [
         {
           "n_vms": 16,
-          "vm-cipassword": "flexfl",
           "vm-net0/bridge": "vmbr1",
           "vm-localtime": 1,
           "vm-cores": 3,
@@ -93,7 +92,6 @@ Pass a JSON config to `pxm-create` via `--config`. Each entry in `vm_configs` ta
       "vms": [
         {
           "n_vms": 32,
-          "vm-cipassword": "flexfl",
           "vm-net0/bridge": "vmbr1",
           "vm-localtime": 1,
           "vm-cores": 4,
@@ -105,6 +103,8 @@ Pass a JSON config to `pxm-create` via `--config`. Each entry in `vm_configs` ta
   ]
 }
 ```
+
+The cloud-init password is injected from `PM_CIPASSWORD`, not stored in the config.
 
 VM options use the `--vm-` prefix (matching the Proxmox API field names). Use `/` for sub-keys:
 

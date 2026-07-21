@@ -360,13 +360,16 @@ class TestWaitForClone(unittest.TestCase):
 
         with patch("pxm_tools.Proxmox.time.monotonic", return_value=0), \
              patch("pxm_tools.Proxmox.time.sleep"):
-            px.wait_for_clone(104)
+            result = px.wait_for_clone(104)
 
         self.assertEqual(px.request.call_count, 3)
         calls = px.request.call_args_list
         self.assertIn("status/current", calls[0].args[1])
-        self.assertIn("/config", calls[1].args[1])
-        self.assertIn("/config", calls[2].args[1])
+        config_calls = [c for c in calls if "/config" in c.args[1]]
+        self.assertGreaterEqual(len(config_calls), 2)
+
+        self.assertIsNone(result)
+        px.console.log.assert_called_once()
 
 
 if __name__ == "__main__":

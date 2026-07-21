@@ -345,5 +345,32 @@ class TestStartAllVmsPositionalAlignment(unittest.TestCase):
         self.assertEqual(txt_lines, expected_txt)
 
 
+class TestWaitForClone(unittest.TestCase):
+    def test_waits_for_clone_lock_to_clear(self):
+        px = Proxmox(args={})
+        px.node = "node1"
+        px.console = MagicMock()
+
+        exists = MagicMock(status_code=200)
+        locked = MagicMock(status_code=200)
+        locked.json.return_value = {"data": {"lock": "clone", "name": "vm"}}
+        unlocked = MagicMock(status_code=200)
+        unlocked.json.return_value = {"data": {"name": "vm"}}
+        px.request = MagicMock(side_effect=[exists, locked, unlocked])
+
+        with patch("pxm_tools.Proxmox.time.monotonic", return_value=0), \
+             patch("pxm_tools.Proxmox.time.sleep"):
+            result = px.wait_for_clone(104)
+
+        self.assertEqual(px.request.call_count, 3)
+        calls = px.request.call_args_list
+        self.assertIn("status/current", calls[0].args[1])
+        config_calls = [c for c in calls if "/config" in c.args[1]]
+        self.assertGreaterEqual(len(config_calls), 2)
+
+        self.assertIsNone(result)
+        px.console.log.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

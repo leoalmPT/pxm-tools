@@ -132,8 +132,10 @@ class Proxmox:
 
     def wait_for_clone(self, vm_id) -> None:
         with self.console.status(f"Cloning VM {vm_id}..."):
-            endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/current"
-            self.wait_for(endpoint, lambda r: r.status_code != 403)
+            status_endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/current"
+            self.wait_for(status_endpoint, lambda r: r.status_code != 403)
+            config_endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/config"
+            self.wait_for(config_endpoint, lambda r: r.status_code == 200 and "lock" not in (r.json().get("data") or {}))
         self.console.log(f"VM [bold cyan]{vm_id}[/bold cyan] cloning completed.")
     
 

@@ -309,7 +309,7 @@ class Proxmox:
         with open(self.args["ips"], "w") as f:
             json.dump(ips, f, indent=2)
 
-        with open(f"{self.args["ips"].split(".")[0]}.txt", "w") as f:
+        with open(Path(self.args["ips"]).with_suffix(".txt"), "w") as f:
             for node in ips:
                 for ip in ips[node]["ips"]:
                     f.write(f"{ip}\n")

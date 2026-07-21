@@ -81,6 +81,7 @@ name = "pxm-tools"
 version = "0.1.5"
 source = { editable = "." }
 dependencies = [
+    { name = "certifi" },
     { name = "pycurl" },
     { name = "python-dotenv" },
     { name = "requests" },
@@ -89,6 +90,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi", specifier = ">=2017.4.17" },
     { name = "pycurl", specifier = ">=7.47.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "requests", specifier = ">=2.32.3" },

@@ -1,5 +1,6 @@
 import requests
 import pycurl
+import certifi
 from dotenv import load_dotenv
 import os
 import urllib3
@@ -92,6 +93,8 @@ class Proxmox:
             curl.setopt(pycurl.TIMEOUT, Proxmox.REQUEST_TIMEOUT)
             curl.setopt(pycurl.SSL_VERIFYPEER, 1 if verify else 0)
             curl.setopt(pycurl.SSL_VERIFYHOST, 2 if verify else 0)
+            if verify:
+                curl.setopt(pycurl.CAINFO, certifi.where())
             curl.perform()
             status_code = curl.getinfo(pycurl.RESPONSE_CODE)
         finally:

@@ -1,4 +1,5 @@
 import requests
+import pycurl
 from dotenv import load_dotenv
 import os
 import urllib3
@@ -8,7 +9,11 @@ from rich.console import Console
 import argparse
 from typing import Callable, Any
 import json
+from collections import namedtuple
+from io import BytesIO
 from pathlib import Path
+
+CurlResponse = namedtuple("CurlResponse", ["status_code", "text"])
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 load_dotenv()
@@ -66,6 +71,32 @@ class Proxmox:
     def request(self, method: str, endpoint: str, data: Any = None) -> requests.Response:
         url = f"{self.api}{endpoint}"
         return getattr(requests, method.lower())(url, headers=self.headers, data=data, verify=Proxmox._tls_verify(), timeout=Proxmox.REQUEST_TIMEOUT)
+
+
+    def _put_config_via_curl(self, endpoint: str, data: dict) -> CurlResponse:
+        url = f"{self.api}{endpoint}"
+        body = urllib.parse.urlencode(data)
+        buffer = BytesIO()
+        verify = Proxmox._tls_verify()
+        curl = pycurl.Curl()
+        try:
+            curl.setopt(pycurl.URL, url)
+            curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
+            curl.setopt(pycurl.POSTFIELDS, body)
+            curl.setopt(pycurl.COOKIE, self.headers["Authorization"])
+            curl.setopt(pycurl.HTTPHEADER, [
+                f"CSRFPreventionToken: {self.headers['CSRFPreventionToken']}",
+                "Content-Type: application/x-www-form-urlencoded",
+            ])
+            curl.setopt(pycurl.WRITEFUNCTION, buffer.write)
+            curl.setopt(pycurl.TIMEOUT, Proxmox.REQUEST_TIMEOUT)
+            curl.setopt(pycurl.SSL_VERIFYPEER, 1 if verify else 0)
+            curl.setopt(pycurl.SSL_VERIFYHOST, 2 if verify else 0)
+            curl.perform()
+            status_code = curl.getinfo(pycurl.RESPONSE_CODE)
+        finally:
+            curl.close()
+        return CurlResponse(status_code=status_code, text=buffer.getvalue().decode(errors="replace"))
 
 
     def check_response(self, response: requests.Response) -> None:
@@ -189,7 +220,7 @@ class Proxmox:
                 sshkeys = f"{sshkey}\n"
             sshkeys = urllib.parse.quote(sshkeys, safe="")
             payload["sshkeys"] = sshkeys
-        response = self.request("put", endpoint, data=payload)
+        response = self._put_config_via_curl(endpoint, payload)
         self.check_response(response)
         self.console.log(f"VM {vm_id} specs changed.")
 

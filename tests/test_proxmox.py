@@ -3,8 +3,10 @@ import os
 import sys
 import tempfile
 import unittest
+import urllib.parse
 from unittest.mock import patch, MagicMock
 
+import pycurl
 import requests
 
 from pxm_tools.Proxmox import Proxmox
@@ -400,6 +402,104 @@ class TestWaitForClone(unittest.TestCase):
 
         self.assertIsNone(result)
         px.console.log.assert_called_once()
+
+
+class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
+    def _make_proxmox(self, pubkey_path, existing_sshkeys=None):
+        px = Proxmox(args={"pubkey": pubkey_path})
+        px.api = "https://node1:8006/"
+        px.node = "node1"
+        px.console = MagicMock()
+        data = {}
+        if existing_sshkeys is not None:
+            data["sshkeys"] = urllib.parse.quote(existing_sshkeys, safe="")
+        get_response = MagicMock(status_code=200)
+        get_response.json.return_value = {"data": data}
+        px.request = MagicMock(return_value=get_response)
+        px._put_config_via_curl = MagicMock(return_value=MagicMock(status_code=200, text=""))
+        return px
+
+    def test_appends_to_existing_sshkeys_and_routes_via_curl(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".pub", delete=False) as f:
+            f.write("ssh-rsa AAAAnewkey\n")
+            pubkey_path = f.name
+        try:
+            existing = "ssh-rsa AAAAexisting\n"
+            px = self._make_proxmox(pubkey_path, existing_sshkeys=existing)
+
+            px.change_specs(104, {"vm-cores": 2})
+
+            px._put_config_via_curl.assert_called_once()
+            call_args = px._put_config_via_curl.call_args
+            endpoint_arg = call_args.args[0]
+            payload_arg = call_args.args[1]
+            self.assertEqual(endpoint_arg, "api2/json/nodes/node1/qemu/104/config")
+            decoded = urllib.parse.unquote(payload_arg["sshkeys"])
+            self.assertIn("ssh-rsa AAAAexisting", decoded)
+            self.assertIn("ssh-rsa AAAAnewkey", decoded)
+
+            put_calls = [c for c in px.request.call_args_list if c.args and c.args[0] == "put"]
+            self.assertEqual(put_calls, [])
+        finally:
+            os.remove(pubkey_path)
+
+    def test_uses_new_key_only_when_no_existing_sshkeys(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".pub", delete=False) as f:
+            f.write("ssh-rsa AAAAnewkey\n")
+            pubkey_path = f.name
+        try:
+            px = self._make_proxmox(pubkey_path, existing_sshkeys=None)
+
+            px.change_specs(104, {"vm-cores": 2})
+
+            px._put_config_via_curl.assert_called_once()
+            payload_arg = px._put_config_via_curl.call_args.args[1]
+            decoded = urllib.parse.unquote(payload_arg["sshkeys"])
+            self.assertEqual(decoded, "ssh-rsa AAAAnewkey\n")
+
+            put_calls = [c for c in px.request.call_args_list if c.args and c.args[0] == "put"]
+            self.assertEqual(put_calls, [])
+        finally:
+            os.remove(pubkey_path)
+
+
+class TestPutConfigViaCurl(unittest.TestCase):
+    def test_builds_put_request_with_urlencoded_body(self):
+        px = Proxmox(args={})
+        px.api = "https://node1:8006/"
+        px.headers = {
+            "Authorization": "PVEAuthCookie=abc",
+            "CSRFPreventionToken": "csrf-token",
+        }
+
+        mock_curl_instance = MagicMock()
+        recorded_setopts = {}
+
+        def fake_setopt(option, value):
+            recorded_setopts[option] = value
+
+        mock_curl_instance.setopt.side_effect = fake_setopt
+        mock_curl_instance.getinfo.return_value = 500
+
+        with patch("pxm_tools.Proxmox.pycurl.Curl", return_value=mock_curl_instance):
+            response = px._put_config_via_curl(
+                "api2/json/nodes/node1/qemu/104/config",
+                {"cores": 2, "sshkeys": "abc%20def"},
+            )
+
+        self.assertEqual(recorded_setopts[pycurl.CUSTOMREQUEST], "PUT")
+        self.assertEqual(
+            recorded_setopts[pycurl.POSTFIELDS],
+            urllib.parse.urlencode({"cores": 2, "sshkeys": "abc%20def"}),
+        )
+        self.assertEqual(recorded_setopts[pycurl.COOKIE], "PVEAuthCookie=abc")
+        headers = recorded_setopts[pycurl.HTTPHEADER]
+        self.assertIn("CSRFPreventionToken: csrf-token", headers)
+        self.assertIn("Content-Type: application/x-www-form-urlencoded", headers)
+
+        mock_curl_instance.perform.assert_called_once()
+        mock_curl_instance.close.assert_called_once()
+        self.assertEqual(response.status_code, 500)
 
 
 if __name__ == "__main__":

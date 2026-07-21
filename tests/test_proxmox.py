@@ -365,6 +365,7 @@ class TestStartAllVmsPositionalAlignment(unittest.TestCase):
                 px.start_all_vms()
 
                 self.assertTrue(os.path.exists("../scripts/ips.txt"))
+                self.assertFalse(os.path.exists(".txt"))
                 with open("../scripts/ips.txt") as f:
                     txt_lines = f.read().splitlines()
             finally:

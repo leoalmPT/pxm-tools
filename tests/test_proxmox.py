@@ -344,6 +344,36 @@ class TestStartAllVmsPositionalAlignment(unittest.TestCase):
         expected_txt = [f"10.0.0.{vm_id}" for node in ids for vm_id in ids[node]["ids"]]
         self.assertEqual(txt_lines, expected_txt)
 
+    def test_writes_txt_for_dotted_relative_ips_path(self):
+        ids = {
+            "frodo": {"api": "https://frodo:8006/", "ids": [104]},
+            "hobbit": {"api": "https://hobbit:8006/", "ids": [108, 109]},
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            os.makedirs(os.path.join(tmp_dir, "scripts"))
+            os.makedirs(os.path.join(tmp_dir, "work"))
+            old_cwd = os.getcwd()
+            os.chdir(os.path.join(tmp_dir, "work"))
+            try:
+                px = Proxmox(args={"ips": "../scripts/ips.json"})
+                px.load_ids = MagicMock(return_value=ids)
+                px.auth = MagicMock()
+                px.start_vm = MagicMock()
+                px.wait_for = MagicMock()
+                px.get_ip = MagicMock(side_effect=lambda vm_id: f"10.0.0.{vm_id}")
+
+                px.start_all_vms()
+
+                self.assertTrue(os.path.exists("../scripts/ips.txt"))
+                self.assertFalse(os.path.exists(".txt"))
+                with open("../scripts/ips.txt") as f:
+                    txt_lines = f.read().splitlines()
+            finally:
+                os.chdir(old_cwd)
+
+        expected_txt = [f"10.0.0.{vm_id}" for node in ids for vm_id in ids[node]["ids"]]
+        self.assertEqual(txt_lines, expected_txt)
+
 
 class TestWaitForClone(unittest.TestCase):
     def test_waits_for_clone_lock_to_clear(self):

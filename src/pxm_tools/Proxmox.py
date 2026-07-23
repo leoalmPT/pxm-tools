@@ -401,7 +401,7 @@ class Proxmox:
                         ignore_ids.append(vm_id)
                         continue
                 self.console.log(f"Deleting VM {vm_id}...")
-                endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}?purge=0&destroy-unreferenced-disks=0"
+                endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}?purge=1&destroy-unreferenced-disks=1"
                 response = self.request("delete", endpoint)
                 self.check_response(response)
         with self.console.status("Waiting for VMs to be deleted..."):

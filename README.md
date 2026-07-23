@@ -157,6 +157,9 @@ uv run pxm-stop --ids ids.json
 uv run pxm-rm --ids ids.json
 ```
 
+`pxm-rm` permanently destroys each VM's disks (including cloudinit) and removes it from
+any backup/replication/HA config — there is no soft-delete.
+
 ## Notes
 
 - VM cloning (`pxm-create`) is sequential — one at a time per Proxmox constraint.

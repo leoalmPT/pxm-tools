@@ -278,7 +278,7 @@ class TestRemoveAllVms403Retry(unittest.TestCase):
         self.assertEqual(len(delete_calls), 1)
         self.assertEqual(
             delete_calls[0].args[1],
-            "api2/json/nodes/node1/qemu/101?purge=0&destroy-unreferenced-disks=0",
+            "api2/json/nodes/node1/qemu/101?purge=1&destroy-unreferenced-disks=1",
         )
         self.assertEqual(px.auth.call_count, 3)
 

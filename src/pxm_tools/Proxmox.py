@@ -199,7 +199,7 @@ class Proxmox:
                         "disk" : "scsi0",
                         "size" : v,
                     }
-                    response = self.request("put", disk_endpoint, data=disk_payload)
+                    response = self._put_config_via_curl(disk_endpoint, disk_payload)
                     self.check_response(response)
                     continue
                 else:

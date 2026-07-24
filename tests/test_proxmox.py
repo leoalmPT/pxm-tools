@@ -471,7 +471,7 @@ class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
         finally:
             os.remove(pubkey_path)
 
-    def test_disk_resize_stays_on_requests_while_config_put_uses_curl(self):
+    def test_disk_resize_and_config_put_both_use_curl(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".pub", delete=False) as f:
             f.write("ssh-rsa AAAAnewkey\n")
             pubkey_path = f.name
@@ -480,17 +480,18 @@ class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
 
             px.change_specs(104, {"disk": 20})
 
-            px._put_config_via_curl.assert_called_once()
-            self.assertEqual(
-                px._put_config_via_curl.call_args.args[0],
-                "api2/json/nodes/node1/qemu/104/config",
-            )
+            self.assertEqual(px._put_config_via_curl.call_count, 2)
             resize_endpoint = "api2/json/nodes/node1/qemu/104/resize"
-            put_resize_calls = [
+            config_endpoint = "api2/json/nodes/node1/qemu/104/config"
+            first_call, second_call = px._put_config_via_curl.call_args_list
+            self.assertEqual(first_call.args[0], resize_endpoint)
+            self.assertEqual(second_call.args[0], config_endpoint)
+
+            put_calls = [
                 c for c in px.request.call_args_list
-                if c.args and c.args[0] == "put" and c.args[1] == resize_endpoint
+                if c.args and c.args[0] == "put"
             ]
-            self.assertEqual(len(put_resize_calls), 1)
+            self.assertEqual(put_calls, [])
         finally:
             os.remove(pubkey_path)
 
@@ -506,6 +507,27 @@ class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
 
             with self.assertRaisesRegex(Exception, "500"):
                 px.change_specs(104, {"vm-cores": 2})
+        finally:
+            os.remove(pubkey_path)
+
+    def test_disk_resize_failure_raises_and_skips_config_put(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".pub", delete=False) as f:
+            f.write("ssh-rsa AAAAnewkey\n")
+            pubkey_path = f.name
+        try:
+            px = self._make_proxmox(pubkey_path, existing_sshkeys=None)
+            px._put_config_via_curl = MagicMock(
+                return_value=MagicMock(status_code=500, text="boom")
+            )
+
+            with self.assertRaisesRegex(Exception, "500"):
+                px.change_specs(104, {"disk": 20})
+
+            px._put_config_via_curl.assert_called_once()
+            resize_endpoint = "api2/json/nodes/node1/qemu/104/resize"
+            self.assertEqual(
+                px._put_config_via_curl.call_args.args[0], resize_endpoint
+            )
         finally:
             os.remove(pubkey_path)
 

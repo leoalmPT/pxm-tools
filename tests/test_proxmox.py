@@ -17,37 +17,100 @@ class TestRequestTimeout(unittest.TestCase):
     def test_request_passes_request_timeout(self):
         px = Proxmox(args={})
         px.api = "https://proxmox.example:8006/"
-        px.headers = {"Authorization": "PVEAuthCookie=abc"}
+        px.headers = {
+            "Authorization": "PVEAuthCookie=abc",
+            "CSRFPreventionToken": "csrf-token",
+        }
 
-        with patch("requests.get") as mock_get:
-            mock_get.return_value = MagicMock(status_code=200)
+        recorded_setopts = {}
+        mock_curl = MagicMock()
+        mock_curl.setopt.side_effect = (
+            lambda opt, val: recorded_setopts.__setitem__(opt, val)
+        )
+        mock_curl.getinfo.return_value = 200
+        with patch("pxm_tools.Proxmox.pycurl.Curl", return_value=mock_curl):
             px.request("get", "api2/json/cluster/nextid")
 
-        mock_get.assert_called_once_with(
+        self.assertEqual(
+            recorded_setopts[pycurl.URL],
             "https://proxmox.example:8006/api2/json/cluster/nextid",
-            headers=px.headers,
-            data=None,
-            verify=False,
-            timeout=Proxmox.REQUEST_TIMEOUT,
         )
+        self.assertEqual(recorded_setopts[pycurl.CUSTOMREQUEST], "GET")
+        self.assertEqual(recorded_setopts[pycurl.TIMEOUT], Proxmox.REQUEST_TIMEOUT)
+        self.assertEqual(recorded_setopts[pycurl.SSL_VERIFYPEER], 0)
 
     def test_request_verifies_tls_when_env_set(self):
         px = Proxmox(args={})
         px.api = "https://proxmox.example:8006/"
-        px.headers = {"Authorization": "PVEAuthCookie=abc"}
+        px.headers = {
+            "Authorization": "PVEAuthCookie=abc",
+            "CSRFPreventionToken": "csrf-token",
+        }
 
-        with patch("requests.get") as mock_get, \
+        recorded_setopts = {}
+        mock_curl = MagicMock()
+        mock_curl.setopt.side_effect = (
+            lambda opt, val: recorded_setopts.__setitem__(opt, val)
+        )
+        mock_curl.getinfo.return_value = 200
+        with patch("pxm_tools.Proxmox.pycurl.Curl", return_value=mock_curl), \
              patch.dict(os.environ, {"PM_VERIFY_TLS": "true"}):
-            mock_get.return_value = MagicMock(status_code=200)
             px.request("get", "api2/json/cluster/nextid")
 
-        mock_get.assert_called_once_with(
+        self.assertEqual(
+            recorded_setopts[pycurl.URL],
             "https://proxmox.example:8006/api2/json/cluster/nextid",
-            headers=px.headers,
-            data=None,
-            verify=True,
-            timeout=Proxmox.REQUEST_TIMEOUT,
         )
+        self.assertEqual(recorded_setopts[pycurl.CUSTOMREQUEST], "GET")
+        self.assertEqual(recorded_setopts[pycurl.TIMEOUT], Proxmox.REQUEST_TIMEOUT)
+        self.assertEqual(recorded_setopts[pycurl.SSL_VERIFYPEER], 1)
+
+    def test_request_with_empty_headers_omits_cookie_and_csrf(self):
+        px = Proxmox(args={})
+        px.api = "https://proxmox.example:8006/"
+        px.headers = {}
+
+        recorded_setopts = {}
+        mock_curl = MagicMock()
+        mock_curl.setopt.side_effect = (
+            lambda opt, val: recorded_setopts.__setitem__(opt, val)
+        )
+        mock_curl.getinfo.return_value = 200
+        with patch("pxm_tools.Proxmox.pycurl.Curl", return_value=mock_curl):
+            px.request(
+                "post",
+                "api2/json/access/ticket",
+                data={"username": "u", "password": "p"},
+            )
+
+        self.assertNotIn(pycurl.COOKIE, recorded_setopts)
+        headers = recorded_setopts[pycurl.HTTPHEADER]
+        self.assertIn("Content-Type: application/x-www-form-urlencoded", headers)
+        self.assertFalse(
+            any(h.startswith("CSRFPreventionToken:") for h in headers)
+        )
+        self.assertEqual(recorded_setopts[pycurl.CUSTOMREQUEST], "POST")
+        self.assertEqual(
+            recorded_setopts[pycurl.POSTFIELDS],
+            urllib.parse.urlencode({"username": "u", "password": "p"}),
+        )
+
+    def test_bodyless_post_sends_empty_postfields(self):
+        px = Proxmox(args={})
+        px.api = "https://proxmox.example:8006/"
+        px.headers = {}
+
+        recorded_setopts = {}
+        mock_curl = MagicMock()
+        mock_curl.setopt.side_effect = (
+            lambda opt, val: recorded_setopts.__setitem__(opt, val)
+        )
+        mock_curl.getinfo.return_value = 200
+        with patch("pxm_tools.Proxmox.pycurl.Curl", return_value=mock_curl):
+            px.request("post", "api2/json/nodes/node1/qemu/104/status/start")
+
+        self.assertEqual(recorded_setopts[pycurl.POSTFIELDS], "")
+        self.assertEqual(recorded_setopts[pycurl.CUSTOMREQUEST], "POST")
 
 
 class TestWaitFor(unittest.TestCase):
@@ -61,25 +124,38 @@ class TestWaitFor(unittest.TestCase):
                 px.wait_for("api2/json/nodes/x/qemu/1/status/current", lambda r: False)
         mock_sleep.assert_not_called()
 
-    def test_wait_for_tolerates_transient_request_exceptions(self):
+    def test_wait_for_tolerates_transient_pycurl_errors(self):
         px = Proxmox(args={})
-        matching_response = MagicMock(status_code=200)
-        px.request = MagicMock(
-            side_effect=[
-                requests.exceptions.ConnectionError("boom"),
-                requests.exceptions.ConnectionError("boom"),
-                matching_response,
-            ]
+        px.api = "https://node1:8006/"
+        px.headers = {}
+
+        recorded_setopts = {}
+        call_counter = {"n": 0}
+        mock_curl = MagicMock()
+        mock_curl.setopt.side_effect = (
+            lambda opt, val: recorded_setopts.__setitem__(opt, val)
         )
-        with patch("pxm_tools.Proxmox.time.monotonic", return_value=0), \
+        mock_curl.getinfo.return_value = 200
+
+        def fake_perform():
+            call_counter["n"] += 1
+            if call_counter["n"] <= 2:
+                raise pycurl.error(7, "Failed to connect")
+            recorded_setopts[pycurl.WRITEFUNCTION](b'{"data": {"status": "match"}}')
+
+        mock_curl.perform.side_effect = fake_perform
+
+        with patch("pxm_tools.Proxmox.pycurl.Curl", return_value=mock_curl), \
+             patch("pxm_tools.Proxmox.time.monotonic", return_value=0), \
              patch("pxm_tools.Proxmox.time.sleep") as mock_sleep:
             result = px.wait_for(
                 "api2/json/nodes/x/qemu/1/status/current",
-                lambda r: r is matching_response,
+                lambda r: r.json()["data"]["status"] == "match",
             )
-        self.assertIs(result, matching_response)
+
+        self.assertEqual(result.json()["data"]["status"], "match")
         self.assertEqual(mock_sleep.call_count, 2)
-        self.assertEqual(px.request.call_count, 3)
+        self.assertEqual(call_counter["n"], 3)
 
     def test_wait_for_surfaces_predicate_error(self):
         px = Proxmox(args={})
@@ -406,7 +482,7 @@ class TestWaitForClone(unittest.TestCase):
 
 
 class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
-    def _make_proxmox(self, pubkey_path, existing_sshkeys=None):
+    def _make_proxmox(self, pubkey_path, existing_sshkeys=None, put_response=None):
         px = Proxmox(args={"pubkey": pubkey_path})
         px.api = "https://node1:8006/"
         px.node = "node1"
@@ -416,8 +492,13 @@ class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
             data["sshkeys"] = urllib.parse.quote(existing_sshkeys, safe="")
         get_response = MagicMock(status_code=200)
         get_response.json.return_value = {"data": data}
-        px.request = MagicMock(return_value=get_response)
-        px._put_config_via_curl = MagicMock(return_value=MagicMock(status_code=200, text=""))
+        if put_response is None:
+            put_response = MagicMock(status_code=200, text="")
+
+        def fake_request(method, endpoint, data=None):
+            return get_response if method == "get" else put_response
+
+        px.request = MagicMock(side_effect=fake_request)
         return px
 
     def test_appends_to_existing_sshkeys_and_routes_via_curl(self):
@@ -430,21 +511,14 @@ class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
 
             px.change_specs(104, {"vm-cores": 2})
 
-            px._put_config_via_curl.assert_called_once()
-            call_args = px._put_config_via_curl.call_args
-            endpoint_arg = call_args.args[0]
-            payload_arg = call_args.args[1]
-            self.assertEqual(endpoint_arg, "api2/json/nodes/node1/qemu/104/config")
-            decoded = urllib.parse.unquote(payload_arg["sshkeys"])
+            put_calls = [c for c in px.request.call_args_list if c.args[0] == "put"]
+            self.assertEqual(len(put_calls), 1)
+            self.assertEqual(
+                put_calls[0].args[1], "api2/json/nodes/node1/qemu/104/config"
+            )
+            decoded = urllib.parse.unquote(put_calls[0].kwargs["data"]["sshkeys"])
             self.assertIn("ssh-rsa AAAAexisting", decoded)
             self.assertIn("ssh-rsa AAAAnewkey", decoded)
-
-            config_endpoint = "api2/json/nodes/node1/qemu/104/config"
-            put_config_calls = [
-                c for c in px.request.call_args_list
-                if c.args and c.args[0] == "put" and c.args[1] == config_endpoint
-            ]
-            self.assertEqual(put_config_calls, [])
         finally:
             os.remove(pubkey_path)
 
@@ -457,17 +531,13 @@ class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
 
             px.change_specs(104, {"vm-cores": 2})
 
-            px._put_config_via_curl.assert_called_once()
-            payload_arg = px._put_config_via_curl.call_args.args[1]
-            decoded = urllib.parse.unquote(payload_arg["sshkeys"])
+            put_calls = [c for c in px.request.call_args_list if c.args[0] == "put"]
+            self.assertEqual(len(put_calls), 1)
+            self.assertEqual(
+                put_calls[0].args[1], "api2/json/nodes/node1/qemu/104/config"
+            )
+            decoded = urllib.parse.unquote(put_calls[0].kwargs["data"]["sshkeys"])
             self.assertEqual(decoded, "ssh-rsa AAAAnewkey\n")
-
-            config_endpoint = "api2/json/nodes/node1/qemu/104/config"
-            put_config_calls = [
-                c for c in px.request.call_args_list
-                if c.args and c.args[0] == "put" and c.args[1] == config_endpoint
-            ]
-            self.assertEqual(put_config_calls, [])
         finally:
             os.remove(pubkey_path)
 
@@ -480,18 +550,12 @@ class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
 
             px.change_specs(104, {"disk": 20})
 
-            self.assertEqual(px._put_config_via_curl.call_count, 2)
+            put_calls = [c for c in px.request.call_args_list if c.args[0] == "put"]
+            self.assertEqual(len(put_calls), 2)
             resize_endpoint = "api2/json/nodes/node1/qemu/104/resize"
             config_endpoint = "api2/json/nodes/node1/qemu/104/config"
-            first_call, second_call = px._put_config_via_curl.call_args_list
-            self.assertEqual(first_call.args[0], resize_endpoint)
-            self.assertEqual(second_call.args[0], config_endpoint)
-
-            put_calls = [
-                c for c in px.request.call_args_list
-                if c.args and c.args[0] == "put"
-            ]
-            self.assertEqual(put_calls, [])
+            self.assertEqual(put_calls[0].args[1], resize_endpoint)
+            self.assertEqual(put_calls[1].args[1], config_endpoint)
         finally:
             os.remove(pubkey_path)
 
@@ -500,9 +564,10 @@ class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
             f.write("ssh-rsa AAAAnewkey\n")
             pubkey_path = f.name
         try:
-            px = self._make_proxmox(pubkey_path, existing_sshkeys=None)
-            px._put_config_via_curl = MagicMock(
-                return_value=MagicMock(status_code=500, text="boom")
+            px = self._make_proxmox(
+                pubkey_path,
+                existing_sshkeys=None,
+                put_response=MagicMock(status_code=500, text="boom"),
             )
 
             with self.assertRaisesRegex(Exception, "500"):
@@ -515,18 +580,19 @@ class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
             f.write("ssh-rsa AAAAnewkey\n")
             pubkey_path = f.name
         try:
-            px = self._make_proxmox(pubkey_path, existing_sshkeys=None)
-            px._put_config_via_curl = MagicMock(
-                return_value=MagicMock(status_code=500, text="boom")
+            px = self._make_proxmox(
+                pubkey_path,
+                existing_sshkeys=None,
+                put_response=MagicMock(status_code=500, text="boom"),
             )
 
             with self.assertRaisesRegex(Exception, "500"):
                 px.change_specs(104, {"disk": 20})
 
-            px._put_config_via_curl.assert_called_once()
+            self.assertEqual(px.request.call_count, 2)
             resize_endpoint = "api2/json/nodes/node1/qemu/104/resize"
             self.assertEqual(
-                px._put_config_via_curl.call_args.args[0], resize_endpoint
+                px.request.call_args_list[1].args[:2], ("put", resize_endpoint)
             )
         finally:
             os.remove(pubkey_path)
@@ -546,14 +612,18 @@ class TestChangeSpecsDoubleEncodingEndToEnd(unittest.TestCase):
                 "Authorization": "PVEAuthCookie=abc",
                 "CSRFPreventionToken": "csrf-token",
             }
-            get_response = MagicMock(status_code=200)
-            get_response.json.return_value = {"data": {}}
-            px.request = MagicMock(return_value=get_response)
-
             recorded_setopts = {}
+            write_cb = {}
+
+            def fake_setopt(opt, val):
+                recorded_setopts[opt] = val
+                if opt == pycurl.WRITEFUNCTION:
+                    write_cb["fn"] = val
+
             mock_curl = MagicMock()
-            mock_curl.setopt.side_effect = lambda opt, val: recorded_setopts.__setitem__(opt, val)
+            mock_curl.setopt.side_effect = fake_setopt
             mock_curl.getinfo.return_value = 200
+            mock_curl.perform.side_effect = lambda: write_cb["fn"](b'{"data": {}}')
 
             with patch("pxm_tools.Proxmox.pycurl.Curl", return_value=mock_curl):
                 px.change_specs(104, {"vm-cores": 2})
@@ -567,7 +637,7 @@ class TestChangeSpecsDoubleEncodingEndToEnd(unittest.TestCase):
             os.remove(pubkey_path)
 
 
-class TestPutConfigViaCurl(unittest.TestCase):
+class TestRequestPutViaCurl(unittest.TestCase):
     def test_builds_put_request_with_urlencoded_body(self):
         px = Proxmox(args={})
         px.api = "https://node1:8006/"
@@ -586,9 +656,10 @@ class TestPutConfigViaCurl(unittest.TestCase):
         mock_curl_instance.getinfo.return_value = 500
 
         with patch("pxm_tools.Proxmox.pycurl.Curl", return_value=mock_curl_instance):
-            response = px._put_config_via_curl(
+            response = px.request(
+                "put",
                 "api2/json/nodes/node1/qemu/104/config",
-                {"cores": 2, "sshkeys": "abc%20def"},
+                data={"cores": 2, "sshkeys": "abc%20def"},
             )
 
         self.assertEqual(recorded_setopts[pycurl.CUSTOMREQUEST], "PUT")
@@ -625,9 +696,10 @@ class TestPutConfigViaCurl(unittest.TestCase):
         mock_curl_instance.getinfo.return_value = 200
         with patch("pxm_tools.Proxmox.pycurl.Curl", return_value=mock_curl_instance), \
              patch.dict(os.environ, env, clear=False):
-            px._put_config_via_curl(
+            px.request(
+                "put",
                 "api2/json/nodes/node1/qemu/104/config",
-                {"cores": 2},
+                data={"cores": 2},
             )
         return recorded_setopts
 
@@ -661,9 +733,10 @@ class TestPutConfigViaCurl(unittest.TestCase):
         )
 
         with patch("pxm_tools.Proxmox.pycurl.Curl", return_value=mock_curl_instance):
-            response = px._put_config_via_curl(
+            response = px.request(
+                "put",
                 "api2/json/nodes/node1/qemu/104/config",
-                {"cores": 2},
+                data={"cores": 2},
             )
 
         self.assertEqual(response.status_code, 500)

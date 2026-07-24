@@ -1,4 +1,3 @@
-import requests
 import pycurl
 import certifi
 from dotenv import load_dotenv
@@ -14,7 +13,9 @@ from collections import namedtuple
 from io import BytesIO
 from pathlib import Path
 
-CurlResponse = namedtuple("CurlResponse", ["status_code", "text"])
+class CurlResponse(namedtuple("CurlResponse", ["status_code", "text"])):
+    def json(self):
+        return json.loads(self.text)
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 load_dotenv()
@@ -69,26 +70,23 @@ class Proxmox:
         #self.auth()
 
 
-    def request(self, method: str, endpoint: str, data: Any = None) -> requests.Response:
+    def request(self, method: str, endpoint: str, data: Any = None) -> "CurlResponse":
         url = f"{self.api}{endpoint}"
-        return getattr(requests, method.lower())(url, headers=self.headers, data=data, verify=Proxmox._tls_verify(), timeout=Proxmox.REQUEST_TIMEOUT)
-
-
-    def _put_config_via_curl(self, endpoint: str, data: dict) -> CurlResponse:
-        url = f"{self.api}{endpoint}"
-        body = urllib.parse.urlencode(data)
         buffer = BytesIO()
         verify = Proxmox._tls_verify()
         curl = pycurl.Curl()
         try:
             curl.setopt(pycurl.URL, url)
-            curl.setopt(pycurl.CUSTOMREQUEST, "PUT")
-            curl.setopt(pycurl.POSTFIELDS, body)
-            curl.setopt(pycurl.COOKIE, self.headers["Authorization"])
-            curl.setopt(pycurl.HTTPHEADER, [
-                f"CSRFPreventionToken: {self.headers['CSRFPreventionToken']}",
-                "Content-Type: application/x-www-form-urlencoded",
-            ])
+            curl.setopt(pycurl.CUSTOMREQUEST, method.upper())
+            if data is not None:
+                curl.setopt(pycurl.POSTFIELDS, urllib.parse.urlencode(data))
+            elif method.lower() in ("post", "put"):
+                curl.setopt(pycurl.POSTFIELDS, "")
+            http_headers = ["Content-Type: application/x-www-form-urlencoded"]
+            if self.headers:
+                curl.setopt(pycurl.COOKIE, self.headers["Authorization"])
+                http_headers.append(f"CSRFPreventionToken: {self.headers['CSRFPreventionToken']}")
+            curl.setopt(pycurl.HTTPHEADER, http_headers)
             curl.setopt(pycurl.WRITEFUNCTION, buffer.write)
             curl.setopt(pycurl.TIMEOUT, Proxmox.REQUEST_TIMEOUT)
             curl.setopt(pycurl.SSL_VERIFYPEER, 1 if verify else 0)
@@ -102,7 +100,7 @@ class Proxmox:
         return CurlResponse(status_code=status_code, text=buffer.getvalue().decode(errors="replace"))
 
 
-    def check_response(self, response: requests.Response) -> None:
+    def check_response(self, response: "CurlResponse") -> None:
         if response.status_code != 200:
             self.console.log(f"Error: {response.status_code}, {response.text}")
             raise Exception(f"Request failed with status code {response.status_code}, {response.text}")
@@ -129,12 +127,12 @@ class Proxmox:
         return response.json()["data"]
     
 
-    def wait_for(self, endpoint: str, fn: Callable[[requests.Response], bool]) -> requests.Response:
+    def wait_for(self, endpoint: str, fn: Callable[["CurlResponse"], bool]) -> "CurlResponse":
         deadline = time.monotonic() + Proxmox.WAIT_TIMEOUT
         while True:
             try:
                 response = self.request("get", endpoint)
-            except requests.exceptions.RequestException as e:
+            except pycurl.error as e:
                 self.console.log(f"Transient error polling {endpoint}: {e}; retrying...")
             else:
                 if fn(response):
@@ -199,7 +197,7 @@ class Proxmox:
                         "disk" : "scsi0",
                         "size" : v,
                     }
-                    response = self._put_config_via_curl(disk_endpoint, disk_payload)
+                    response = self.request("put", disk_endpoint, data=disk_payload)
                     self.check_response(response)
                     continue
                 else:
@@ -223,7 +221,7 @@ class Proxmox:
                 sshkeys = f"{sshkey}\n"
             sshkeys = urllib.parse.quote(sshkeys, safe="")
             payload["sshkeys"] = sshkeys
-        response = self._put_config_via_curl(endpoint, payload)
+        response = self.request("put", endpoint, data=payload)
         self.check_response(response)
         self.console.log(f"VM {vm_id} specs changed.")
 

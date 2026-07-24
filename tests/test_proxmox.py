@@ -510,6 +510,27 @@ class TestChangeSpecsSSHKeysRouting(unittest.TestCase):
         finally:
             os.remove(pubkey_path)
 
+    def test_disk_resize_failure_raises_and_skips_config_put(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".pub", delete=False) as f:
+            f.write("ssh-rsa AAAAnewkey\n")
+            pubkey_path = f.name
+        try:
+            px = self._make_proxmox(pubkey_path, existing_sshkeys=None)
+            px._put_config_via_curl = MagicMock(
+                return_value=MagicMock(status_code=500, text="boom")
+            )
+
+            with self.assertRaisesRegex(Exception, "500"):
+                px.change_specs(104, {"disk": 20})
+
+            px._put_config_via_curl.assert_called_once()
+            resize_endpoint = "api2/json/nodes/node1/qemu/104/resize"
+            self.assertEqual(
+                px._put_config_via_curl.call_args.args[0], resize_endpoint
+            )
+        finally:
+            os.remove(pubkey_path)
+
 
 class TestChangeSpecsDoubleEncodingEndToEnd(unittest.TestCase):
     def test_sshkeys_double_encoded_in_postfields(self):

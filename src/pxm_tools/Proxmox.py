@@ -39,6 +39,8 @@ class Proxmox:
         parser.add_argument("--pass", type=str, default=os.getenv("PM_PASS"), help="Proxmox password")
         parser.add_argument("--ids", type=str, default="ids.json", help="File to save VM IDs")
         parser.add_argument("--ips", type=str, default="ips.json", help="File to save VM IPs")
+        parser.add_argument("--start-delay", type=float, default=float(os.getenv("PM_START_DELAY", 60)),
+            help="Seconds to wait between starting VMs")
         return parser
     
 
@@ -294,28 +296,35 @@ class Proxmox:
         raise Exception("No IPv4 address found for eth0.")
     
 
-    def start_vm(self, vm_id) -> None:
+    def start_vm(self, vm_id) -> bool:
         endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/current"
         response = self.request("get", endpoint)
         self.check_response(response)
         if response.json()["data"]["status"] == "running":
             self.console.log(f"VM {vm_id} is already running.")
-            return
+            return False
         endpoint = f"api2/json/nodes/{self.node}/qemu/{vm_id}/status/start"
         response = self.request("post", endpoint)
         self.check_response(response)
         self.console.log(f"VM {vm_id} is starting...")
+        return True
 
 
     def start_all_vms(self) -> None:
         ids = self.load_ids()
         ips = {}
+        start_delay = float(self.args.get("start_delay") or 0)
+        total = sum(len(ids[node]["ids"]) for node in ids)
+        seen = 0
         for node in ids:
             self.node = node
             self.api = ids[node]["api"]
             self.auth()
             for vm_id in ids[node]["ids"]:
-                self.start_vm(vm_id)
+                seen += 1
+                if self.start_vm(vm_id) and start_delay > 0 and seen < total:
+                    self.console.log(f"Waiting {start_delay:g}s before starting the next VM...")
+                    time.sleep(start_delay)
 
         with self.console.status("Waiting for VMs to start..."):
             for node in ids:

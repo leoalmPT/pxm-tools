@@ -743,5 +743,71 @@ class TestRequestPutViaCurl(unittest.TestCase):
         self.assertEqual(response.text, "error body")
 
 
+class TestStartDelay(unittest.TestCase):
+    def _px(self, statuses, start_delay):
+        """A Proxmox whose downstream calls are stubbed, driven by per-VM statuses."""
+        tmp = tempfile.mkdtemp()
+        px = Proxmox(args={
+            "ids": "unused",
+            "ips": os.path.join(tmp, "ips.json"),
+            "start_delay": start_delay,
+        })
+        px.load_ids = lambda: {
+            "node1": {"api": "https://node1:8006/", "ids": list(statuses)},
+        }
+        px.auth = lambda: None
+        px.check_response = lambda response: None
+        px.wait_for = lambda *args, **kwargs: None
+        px.get_ip = lambda vm_id: "10.0.0.1"
+
+        def fake_request(method, endpoint, data=None):
+            vm_id = endpoint.split("/qemu/")[1].split("/")[0]
+            payload = {"data": {"status": statuses[vm_id]}}
+            return MagicMock(status_code=200, json=MagicMock(return_value=payload))
+
+        px.request = fake_request
+        return px
+
+    def test_stopped_vms_are_staggered_but_not_after_the_last(self):
+        px = self._px({"101": "stopped", "102": "stopped", "103": "stopped"}, 60)
+
+        with patch("pxm_tools.Proxmox.time.sleep") as sleep:
+            px.start_all_vms()
+
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [60, 60])
+
+    def test_already_running_vms_incur_no_delay(self):
+        px = self._px({"101": "running", "102": "running"}, 60)
+
+        with patch("pxm_tools.Proxmox.time.sleep") as sleep:
+            px.start_all_vms()
+
+        self.assertEqual(sleep.call_count, 0)
+
+    def test_only_real_starts_are_delayed(self):
+        px = self._px({"101": "running", "102": "stopped", "103": "stopped"}, 30)
+
+        with patch("pxm_tools.Proxmox.time.sleep") as sleep:
+            px.start_all_vms()
+
+        self.assertEqual(sleep.call_count, 1)
+
+    def test_zero_delay_reproduces_previous_behaviour(self):
+        px = self._px({"101": "stopped", "102": "stopped"}, 0)
+
+        with patch("pxm_tools.Proxmox.time.sleep") as sleep:
+            px.start_all_vms()
+
+        self.assertEqual(sleep.call_count, 0)
+
+    def test_start_delay_is_exposed_on_the_parser(self):
+        parser = Proxmox.default_parser()
+        args = parser.parse_args([])
+        self.assertEqual(args.start_delay, 60.0)
+        args = parser.parse_args(["--start-delay", "5"])
+        self.assertEqual(args.start_delay, 5.0)
+
+
 if __name__ == "__main__":
     unittest.main()

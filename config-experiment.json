@@ -22,7 +22,7 @@
             "api": "https://hobbit.av.it.pt:8006/",
             "node": "hobbit",
             "pool": "federatedLearning",
-            "template": 4000,
+            "template": 3011,
             "vms": [
                 {
                     "n_vms": 16,
@@ -39,7 +39,7 @@
             "api": "https://samwise.av.it.pt:8006/",
             "node": "samwise",
             "pool": "federatedLearning",
-            "template": 3000,
+            "template": 4011,
             "vms": [
                 {
                     "n_vms": 32,
@@ -56,7 +56,7 @@
             "api": "https://frodo.av.it.pt:8006/",
             "node": "frodo",
             "pool": "federatedLearning",
-            "template": 2000,
+            "template": 2011,
             "vms": [
                 {
                     "n_vms": 1,
